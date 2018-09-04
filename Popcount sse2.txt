@@ -1,0 +1,472 @@
+There was a thread about population count in comp.lang.fortran but
+nobody seemed to like my assembly code over there:
+
+http://groups.google.com/group/comp.lang.fortran/msg/271b9850acfafabc
+
+Looking around, I found an old thread:
+
+http://groups.google.com/group/comp.lang.asm.x86/msg/54d29f732e51de93
+
+which was very similar to the code I posted, so I thought I would
+post a revision of my code along with an explanation of how it is
+different.
+
+Of course the most obvious difference is that my code is actual
+SSE2 code, whereas the older code was 32-bit C code.  SSE2 has the
+surprising PSADBW instruction which sweeps the floor after 8-bit
+sums have been completed in my wrap() subroutine (analogous to the
+pop() function in the older code).  It's not clear how you are
+supposed to tease a compiler into generating this instruction;
+Fortran has a way to request it in a single expression but it is
+unfathomable code that the compiler probably wouldn't convert in
+the desired way, so the normal thing you see is a multiply and
+shift as in the AMD Software Optimization Guide for AMD64
+Processors.
+
+But the big difference lies in implementation of the Carry-Save
+Adder (CSA) compression scheme.  You will recall that the
+fundamental sequence of operations, starting with inputs A, B,
+and C is:
+
+L = A .XOR. B
+H = A .AND. B
+H = H .OR. (C .AND. L)
+L = C .XOR. L
+
+Now, on a 3-register ISA such as Alpha, this sequence can be carried
+out in 5 instructions, but there is a complication in a 2-register
+ISA like the topical SSE2 because you need both A .XOR. B and
+A .AND. B, but SSE2 always overwrites one of its operands.  Same
+with C .XOR. L and C .AND. L, so it seems that you will need to
+issue 2 copy instructions so that the sequence will take 7
+instructions instead of 5.
+
+I was thinking about this the other day and one of the things that
+bugs me about the MMX/SSE ISA is that the PANDN instruction is
+backwards.  That is, the sequence:
+
+A = A .XOR. B
+B = B .AND. (.NOT. A)
+
+would leave A and B in the roles of L and H respectively in the
+canonical sequence of Harley (et al?), but alas, the PANDN
+instruction negates the destination register rather than the source.
+I couldn't see any way to make this work until it occurred to me
+that the thing to do was to negate the starting register and then
+proceed from there:
+
+L = .TRUE.
+....
+L = L .XOR. A
+A = A .AND. L
+L = L .XOR. B
+B = B .AND. L
+B = A .OR. B
+
+Where this scheme implemented in function popcnt1() in my code
+is completely analogous to the pop_array5() function in Andrew
+Felch's old post:
+
+current old
+-----------
+   L    ones
+   A    A[i]
+   B    A[i+1]
+   B    twosA
+
+for the inputs and outputs of the first CSA iteration.  The
+difference is that I start out with ones = .NOT. .FALSE. so
+that on the first iteration I get
+
+L = L .XOR. A = .TRUE. .XOR. A0 = .NOT. A0 ; Negation of current sum
+A = A .AND. L = A0 .AND. (.NOT. A0) = .FALSE. ; Correct carry!
+L = L .XOR. B = (.NOT. A0) .XOR. B0
+  = .NOT. (A0 .XOR. B0) ; Negation of current sum!
+B = B .AND. L = B0 .AND. ((.NOT. A0) .XOR. B0)
+  = B0 .AND. (((.NOT. A0) .AND. (.NOT. B0)) .OR. (A0 .AND. B0))
+  = (B0 .AND. ((.NOT. A0) .AND. (.NOT. B0))) .OR. (B0 .AND. (A0 .AND. B0))
+  = (.FALSE.) .OR. (A0 .AND. B0) = A0 .AND. B0; Correct carry!
+B = A0 .OR. B0 = .FALSE. .OR. (A0 .AND. B0)
+  = A0 .AND. B0; Correct twosA
+
+Thinking about this, the reader can envision that simply starting
+with fours = twos = ones = ~0 (negative logic) in function pop_array5
+in the old code permits us to carry out all those CSA operations in 5
+SSE2 instructions each rather than the 7 which were necessary with
+positive logic.  Of course the line:
+
+tot = 8*tot + 4*pop(fours) + 2*pop(twos) + pop(ones);
+
+is replaced by:
+
+tot = 8*tot - 4*pop(fours) - 2*pop(twos) - pop(ones) + 896;
+
+to correct for the negative logic.  Hence the overhead for
+eliminating 2 out of 7 inner loop instructions is only the
+addition of the total number of weighted bits in all counters,
+just one instruction outside the loop.  The implementation of
+negative logic reduced my test of counting bits in 32768 bytes
+from about 9100 clocks to about 6950 clocks on my Core 2 Duo
+E6700.  Here it is in GAS with gfortran driver program:
+
+C:\gfortran\clf\popcnt>type big_popcnt3.s
+        .text
+..globl _tm1
+        .def    _tm1;   .scl    2;      .type   32;     .endef
+_tm1:
+        rdtsc
+        shrq    $32, %rdx
+        orq     %rdx, %rax
+        ret
+..globl _popcnt1
+        .def    _popcnt1;       .scl    2;      .type   32;     .endef
+..align 16
+_popcnt1:
+        subq    $56, %rsp
+        movaps  %xmm6, (%rsp)
+        movaps  %xmm7, 16(%rsp)
+        movaps  %xmm8, 32(%rsp)
+        movaps  %xmm14, 64(%rsp)
+        movaps  %xmm15, 80(%rsp)
+        movq    $0x3333333333333333, %rax
+        movq    %rax, %xmm0
+        movddup %xmm0, %xmm15
+        xorps   %xmm14, %xmm14
+
+        pcmpeqd %xmm1, %xmm1
+        pcmpeqd %xmm3, %xmm3
+        pcmpeqd %xmm5, %xmm5
+        xorps   %xmm7, %xmm7
+
+        movl    $32768, %edx
+
+..align 16
+loop1:  movaps  (%rcx), %xmm6
+        xorps   %xmm6, %xmm1
+        andps   %xmm1, %xmm6
+        movaps  16(%rcx), %xmm0
+        xorps   %xmm0, %xmm1
+        andps   %xmm1, %xmm0
+        orps    %xmm0, %xmm6
+        movaps  32(%rcx), %xmm4
+        xorps   %xmm4, %xmm1
+        andps   %xmm1, %xmm4
+        movaps  48(%rcx), %xmm0
+        xorps   %xmm0, %xmm1
+        andps   %xmm1, %xmm0
+        orps    %xmm0, %xmm4
+        movaps  64(%rcx), %xmm2
+        xorps   %xmm2, %xmm1
+        andps   %xmm1, %xmm2
+        movaps  80(%rcx), %xmm0
+        xorps   %xmm0, %xmm1
+        andps   %xmm1, %xmm0
+        orps    %xmm0, %xmm2
+        movaps  96(%rcx), %xmm0
+        xorps   %xmm0, %xmm1
+        andps   %xmm1, %xmm0
+        movaps  112(%rcx), %xmm8
+        xorps   %xmm8, %xmm1
+        andps   %xmm1, %xmm8
+        orps    %xmm8, %xmm0
+
+        xorps   %xmm6, %xmm3
+        andps   %xmm3, %xmm6
+        xorps   %xmm4, %xmm3
+        andps   %xmm3, %xmm4
+        orps    %xmm4, %xmm6
+        xorps   %xmm2, %xmm3
+        andps   %xmm3, %xmm2
+        xorps   %xmm0, %xmm3
+        andps   %xmm3, %xmm0
+        orps    %xmm0, %xmm2
+        xorps   %xmm6, %xmm5
+        andps   %xmm5, %xmm6
+        xorps   %xmm2, %xmm5
+        andps   %xmm5, %xmm2
+        orps    %xmm2, %xmm6
+
+        movaps  stuff, %xmm0
+        andps   %xmm6, %xmm0
+        psrld   $1, %xmm0
+        psubd   %xmm0, %xmm6
+        movaps  %xmm15, %xmm0
+        andnps  %xmm6, %xmm0
+        psrld   $2, %xmm0
+        andps   %xmm15, %xmm6
+        paddd   %xmm0, %xmm6
+        movaps  %xmm6, %xmm0
+        psrld   $4, %xmm6
+        paddd   %xmm0, %xmm6
+        andps   nonsense, %xmm6
+        psadbw  %xmm14, %xmm6
+        paddd   %xmm6, %xmm7
+
+        addq    $128, %rcx
+        subq    $128, %rdx
+        jnz     loop1
+
+        movaps  %xmm5, %xmm6
+        call    wrap
+        paddq   %xmm7, %xmm7
+        psubq   %xmm6, %xmm7
+        movaps  %xmm3, %xmm6
+        call    wrap
+        paddq   %xmm7, %xmm7
+        psubq   %xmm6, %xmm7
+        movaps  %xmm1, %xmm6
+        call    wrap
+        paddq   %xmm7, %xmm7
+        psubq   %xmm6, %xmm7
+        movhlps %xmm7, %xmm1
+        paddq   %xmm7, %xmm1
+        movq    %xmm1, %rax
+        addq    $896, %rax
+
+        movaps  (%rsp), %xmm6
+        movaps  16(%rsp), %xmm7
+        movaps  32(%rsp), %xmm8
+        movaps  64(%rsp), %xmm14
+        movaps  80(%rsp), %xmm15
+        addq    $56, %rsp
+        ret
+
+..align 16
+wrap:   movaps  stuff, %xmm0
+        andps   %xmm6, %xmm0
+        psrld   $1, %xmm0
+        psubd   %xmm0, %xmm6
+        movaps  %xmm15, %xmm0
+        andnps  %xmm6, %xmm0
+        psrld   $2, %xmm0
+        andps   %xmm15, %xmm6
+        paddd   %xmm0, %xmm6
+        movaps  %xmm6, %xmm0
+        psrld   $4, %xmm6
+        paddd   %xmm0, %xmm6
+        andps   nonsense, %xmm6
+        psadbw  %xmm14, %xmm6
+        ret
+
+..globl _popcnt3
+        .def    _popcnt3;       .scl    2;      .type   32;     .endef
+..align 16
+_popcnt3:
+        movq    $0x3333333333333333, %rax
+        movq    %rax, %xmm0
+        movddup %xmm0, %xmm3
+        xorps   %xmm2, %xmm2
+
+        xorps   %xmm4, %xmm4
+
+        movl    $32768, %edx
+        addq    %rdx, %rcx
+        negq    %rdx
+
+..align 16
+loop2:  movaps  (%rcx,%rdx), %xmm1
+        movapd  stuff, %xmm0
+        andps   %xmm1, %xmm0
+        psrld   $1, %xmm0
+        psubd   %xmm0, %xmm1
+        movapd  %xmm3, %xmm0
+        andnps  %xmm1, %xmm0
+        psrld   $2, %xmm0
+        andpd   %xmm3, %xmm1
+        paddd   %xmm0, %xmm1
+        movaps  %xmm1, %xmm0
+        psrld   $4, %xmm1
+        paddd   %xmm0, %xmm1
+        andpd   nonsense, %xmm1
+        psadbw  %xmm2, %xmm1
+        paddd   %xmm1, %xmm4
+
+        addq    $16, %rdx
+        jnz     loop2
+        movhlps %xmm4, %xmm1
+        paddq   %xmm4, %xmm1
+        movq    %xmm1, %rax
+
+        ret
+
+        .data
+..align 16
+        stuff:
+        .long   0xaaaaaaaa
+        .long   0xaaaaaaaa
+        .long   0xaaaaaaaa
+        .long   0xaaaaaaaa
+        nonsense:
+        .long   0x0f0f0f0f
+        .long   0x0f0f0f0f
+        .long   0x0f0f0f0f
+        .long   0x0f0f0f0f
+
+C:\gfortran\clf\popcnt>type big_test1.f90
+program big_test1
+   use ISO_C_BINDING
+   implicit none
+   interface
+      function tm1() bind(C)
+         import C_INT64_T
+         implicit none
+
+         integer(C_INT64_T) tm1
+      end function tm1
+   end interface
+
+   interface
+      function popcnt1(x) bind(C)
+         import C_INT64_T
+         import C_PTR
+         implicit none
+
+         integer(C_INT64_T) popcnt1
+         type(C_PTR), value :: x
+      end function popcnt1
+   end interface
+
+   interface
+      function popcnt2(x,n) bind(C)
+         import C_INT64_T
+         import C_PTR
+         import C_INT
+         implicit none
+
+         integer(C_INT64_T) popcnt2
+         type(C_PTR), value :: x
+         integer(C_INT) n
+      end function popcnt2
+   end interface
+
+   interface
+      function popcnt3(x) bind(C)
+         import C_INT64_T
+         import C_PTR
+         implicit none
+
+         integer(C_INT64_T) popcnt3
+         type(C_PTR), value :: x
+      end function popcnt3
+   end interface
+
+   interface
+      subroutine sieve(t, n) bind(C)
+         import C_PTR
+         import C_INT
+         implicit none
+
+         type(C_PTR), value :: t
+         integer(C_INT) n
+      end subroutine sieve
+   end interface
+
+   integer(C_INT8_T), allocatable, target :: x(:)
+   integer(C_INT), parameter :: Nbytes = 32768 ! popcnt1 hardwired to this
+   integer, parameter :: align = 16 ! Will use xmm registers
+   type(C_PTR) x_ptr
+   integer(C_INTPTR_T) x_start
+   integer(C_INTPTR_T) t_start
+   type(C_PTR) t_ptr
+   integer i
+   integer(C_INT64_T) t0, t1, np
+
+   allocate(x(Nbytes+align-1))
+   x_ptr = C_LOC(x(1))
+   x_start = transfer(x_ptr, x_start)
+   t_start = iand(x_start+align-1, int(not(align-1),C_INTPTR_T))
+   t_ptr = transfer(t_start, t_ptr)
+   call sieve(t_ptr, Nbytes)
+   do i = 1, 4
+      t0 = tm1()
+      np = popcnt1(t_ptr)
+      t1 = tm1()
+      write(*,'(2(a,i0))') 'popcnt1 np = ', np, ' clocks = ', t1-t0
+      t0 = tm1()
+      np = popcnt2(t_ptr, Nbytes/4)
+      t1 = tm1()
+      write(*,'(2(a,i0))') 'popcnt2 np = ', np, ' clocks = ', t1-t0
+      t0 = tm1()
+      np = popcnt3(t_ptr)
+      t1 = tm1()
+      write(*,'(2(a,i0))') 'popcnt3 np = ', np, ' clocks = ', t1-t0
+   end do
+
+end program big_test1
+
+subroutine sieve(t, n) bind(C)
+   use ISO_C_BINDING
+   implicit none
+   integer(C_INT) n
+   integer(C_INT8_T) t(0:n-1)
+   integer i, lim, j
+
+   lim = sqrt(8*n+0.5_C_DOUBLE)
+   t = -1
+   t(0) = ibclr(t(0), 0)
+   do i = 2, lim
+      if(btest(t((i-1)/8),modulo(i-1,8))) then
+         do j = i**2, 8*n, i
+            t((j-1)/8) = ibclr(t((j-1)/8),modulo(j-1,8))
+         end do
+      end if
+   end do
+end subroutine sieve
+
+function popcnt2(MAT, Nwords) bind(C)
+   use ISO_C_BINDING
+   implicit none
+   integer(C_INT64_T) popcnt2
+   integer(C_INT) Nwords
+   integer(C_INT16_T) MAT(2*Nwords)
+   integer i, j
+   integer(C_INT8_T), parameter :: IBITC(0:255) = [( &
+      ibits(i,0,1)+ibits(i,1,1)+ibits(i,2,1)+ibits(i,3,1)+ &
+      ibits(i,4,1)+ibits(i,5,1)+ibits(i,6,1)+ibits(i,7,1), &
+      i=0,255)]
+   integer(C_INT16_T) K1, K2
+
+   popcnt2 = 0
+   do i = 1, 2*Nwords
+      K1 = MAT(i)
+      K2 = ishft(K1, -8)
+      K1 = iand(K1, int(z'ff', C_INT16_T))
+      popcnt2 = popcnt2+IBITC(K1)+IBITC(K2)
+   end do
+end function popcnt2
+
+C:\gfortran\clf\popcnt>C:\gfortran\win64\bin\x86_64-pc-mingw32-gfortran -O2
+big_
+test1.f90 big_popcnt3.s -obig_test1
+
+C:\gfortran\clf\popcnt>big_test1 > big_test1.txt
+
+C:\gfortran\clf\popcnt>big_test1 > big_test1.txt
+
+C:\gfortran\clf\popcnt>big_test1 > big_test1.txt
+
+C:\gfortran\clf\popcnt>type big_test1.txt
+popcnt1 np = 23000 clocks = 6940
+popcnt2 np = 23000 clocks = 82890
+popcnt3 np = 23000 clocks = 15180
+popcnt1 np = 23000 clocks = 6900
+popcnt2 np = 23000 clocks = 82690
+popcnt3 np = 23000 clocks = 15120
+popcnt1 np = 23000 clocks = 6900
+popcnt2 np = 23000 clocks = 82560
+popcnt3 np = 23000 clocks = 15070
+popcnt1 np = 23000 clocks = 6960
+popcnt2 np = 23000 clocks = 82550
+popcnt3 np = 23000 clocks = 15060
+
+I hope you don't mind the Fortran driver.  The popcnt1 function is
+invoked by passing the address of a 16-byte aligned array of 32768
+bytes to be population counted in rcx and returns its result in rax.
+It uses the 64-bit Windows calling convention.  In the above, popcnt2
+was an 8-bit LUT solution and popcnt3 was similar to popcnt1 but
+without CSA compression.  I hope you enjoy this wrinkle on an old
+technique.
+
+-- 
+write(*,*) transfer((/17.392111325966148d0,6.5794487871554595D-85, &
+6.0134700243160014d-154/),(/'x'/)); end

@@ -1,0 +1,29 @@
+Hi all,
+while testing SSE PHADDx instructions i came upon the idea
+(most like a joke) to use it for a POPCNT instruction.
+
+i would be pleased to discuss with You the following
+population count snippet. ok, the snippet first:
+
+  movdqa xmm3,dqword[mynum]   ; 30303030'22222222h,0ABB0832'11440C20h
+  movdqa xmm2,dqword[mask_0F] ; 0F0F0F0F'0F0F0F0Fh,0F0F0F0F'0F0F0F0Fh
+  movdqa xmm1,xmm3            ; 30303030'22222222h,0ABB0832'11440C20h
+  psrlw  xmm1,4               ; 03030303'02220222h,00AB0083'011400C2h
+  pand xmm3,xmm2              ; 00000000'02020202h,0A0B0802'01040C00h
+  pand xmm1,xmm2              ; 03030303'02020202h,000B0003'01040002h
+  movdqa xmm0,dqword[mask_bt] ; 04030302'03020201h,03020201'02010100h
+  movdqa xmm2,xmm0            ; 04030302'03020201h,03020201'02010100h
+  pshufb xmm0,xmm1            ; 02020202'01010101h,00030002'01010001h
+  pshufb xmm2,xmm3            ; 00000000'01010101h,02030101'01010200h
+  paddb xmm0,xmm2             ; 02020202'02020202h,02060103'02020201h
+  phaddd xmm0,xmm0            ; 04040404'04080304h,04040404'04080304h
+  phaddw xmm0,xmm0            ; 0808070C'0808070Ch,0808070C'0808070Ch
+  movdq2q mm0,xmm0            ; 0808070C'0808070Ch
+  phaddw mm0,mm0              ; 0F140F14'0F140F14h
+  movd eax,mm0                ; 00000000'0F140F14h
+  add al,ah                   ; 00000000'0F140F23h
+  movzx rax,al                ; 00000000'00000023h
+
+Thats'all. it works to calc max 128 bits. Note that i didnt test it
+against speed or size, for some reasons i will reserve them for me
+till up after having heard what you think about.
