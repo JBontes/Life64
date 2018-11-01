@@ -3,7 +3,7 @@ object Form2: TForm2
   Top = 0
   ActiveControl = PageControl1
   Caption = 'Form2'
-  ClientHeight = 721
+  ClientHeight = 729
   ClientWidth = 1514
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
@@ -12,6 +12,7 @@ object Form2: TForm2
   Font.Name = 'Tahoma'
   Font.Style = []
   OldCreateOrder = False
+  OnActivate = FormActivate
   OnCreate = FormCreate
   OnShow = FormShow
   PixelsPerInch = 96
@@ -20,7 +21,7 @@ object Form2: TForm2
     Left = 0
     Top = 0
     Width = 1514
-    Height = 721
+    Height = 729
     ActivePage = TabSheet1
     Align = alClient
     Style = tsFlatButtons
@@ -120,18 +121,18 @@ object Form2: TForm2
           'Memo1')
         TabOrder = 1
       end
-      object Button2: TButton
+      object BtnProcess_7x7_CountLookup: TButton
         Left = 3
         Top = 17
         Width = 169
         Height = 25
         Caption = 'Process 7x7 count lookup'
         TabOrder = 2
-        OnClick = Button2Click
+        OnClick = BtnProcess_7x7_CountLookupClick
       end
       object StringGrid1: TStringGrid
-        Left = 182
-        Top = 154
+        Left = 181
+        Top = 157
         Width = 503
         Height = 503
         ColCount = 20
@@ -143,8 +144,9 @@ object Form2: TForm2
         FixedRows = 0
         ParentCtl3D = False
         TabOrder = 3
-        OnClick = StringGrid1DblClick
         OnDblClick = StringGrid1DblClick
+        OnDrawCell = StringGrid2DrawCell
+        OnMouseUp = StringGrid1MouseUp
         ColWidths = (
           24
           24
@@ -188,14 +190,14 @@ object Form2: TForm2
           24
           24)
       end
-      object Button3: TButton
+      object BtnAppyLookupTable: TButton
         Left = 487
         Top = 31
         Width = 418
         Height = 25
         Caption = 'Appy lookup table'
         TabOrder = 4
-        OnClick = Button3Click
+        OnClick = BtnAppyLookupTableClick
       end
       object StringGrid2: TStringGrid
         Left = 690
@@ -248,32 +250,32 @@ object Form2: TForm2
           24
           24)
       end
-      object Button4: TButton
+      object BtnSolveRoundUsingChunks: TButton
         Left = 487
         Top = 62
         Width = 418
         Height = 25
         Caption = 'Solve a round using chunks'
         TabOrder = 6
-        OnClick = Button4Click
+        OnClick = BtnSolveRoundUsingChunksClick
       end
-      object Button5: TButton
+      object BtnClearGrid: TButton
         Left = 487
         Top = 126
         Width = 418
         Height = 25
         Caption = 'Clear grid'
         TabOrder = 7
-        OnClick = Button5Click
+        OnClick = BtnClearGridClick
       end
-      object Button6: TButton
+      object BtnTestLookup0_012: TButton
         Left = 512
         Top = 0
         Width = 337
         Height = 25
         Caption = 'Test lookup0, 012'
         TabOrder = 8
-        OnClick = Button6Click
+        OnClick = BtnTestLookup0_012Click
       end
       object StringGrid3: TStringGrid
         Left = 1098
@@ -326,50 +328,50 @@ object Form2: TForm2
           24
           24)
       end
-      object Button7: TButton
+      object BtnMinimalSolve: TButton
         Left = 248
         Top = 95
         Width = 233
         Height = 25
         Caption = 'Minimal solve'
         TabOrder = 10
-        OnClick = Button7Click
+        OnClick = BtnMinimalSolveClick
       end
-      object Button9: TButton
+      object BtnSolveCounter: TButton
         Left = 944
         Top = 31
         Width = 233
         Height = 25
         Caption = 'Solve counter'
         TabOrder = 11
-        OnClick = Button9Click
+        OnClick = BtnSolveCounterClick
       end
-      object Button10: TButton
+      object BtnRotateCounter: TButton
         Left = 944
         Top = 0
         Width = 233
         Height = 25
         Caption = 'Rotate counter'
         TabOrder = 12
-        OnClick = Button10Click
+        OnClick = BtnRotateCounterClick
       end
-      object Button11: TButton
+      object BtnSliverSolveRound: TButton
         Left = 487
         Top = 95
         Width = 418
         Height = 25
         Caption = 'Solve a round using slivers'
         TabOrder = 13
-        OnClick = Button11Click
+        OnClick = BtnSliverSolveRoundClick
       end
-      object Button12: TButton
+      object BtnInitWith_GoE: TButton
         Left = 248
         Top = 126
         Width = 233
         Height = 25
         Caption = 'Init with GoE'
         TabOrder = 14
-        OnClick = Button12Click
+        OnClick = BtnInitWith_GoEClick
       end
       object BtnLoadSmallLookups: TButton
         Left = 248
@@ -380,23 +382,137 @@ object Form2: TForm2
         TabOrder = 15
         OnClick = BtnLoadSmallLookupsClick
       end
-      object Button13: TButton
+      object BtnSolveWithChunkLookup: TButton
         Left = 248
         Top = 34
         Width = 187
         Height = 25
         Caption = 'Solve with chunk-lookup'
         TabOrder = 16
-        OnClick = Button13Click
+        OnClick = BtnSolveWithChunkLookupClick
       end
-      object Button16: TButton
+      object BtnApplyNELookupTables: TButton
         Left = 1201
         Top = 0
         Width = 300
         Height = 25
         Caption = 'Apply N/E lookup tables'
         TabOrder = 17
-        OnClick = Button16Click
+        OnClick = BtnApplyNELookupTablesClick
+      end
+      object BtnApplyCornerLookupTables: TButton
+        Left = 1201
+        Top = 31
+        Width = 300
+        Height = 25
+        Caption = 'Apply corner lookup tables'
+        TabOrder = 18
+        OnClick = BtnApplyCornerLookupTablesClick
+      end
+      object StringGrid5: TStringGrid
+        Left = 691
+        Top = 613
+        Width = 783
+        Height = 61
+        ColCount = 80
+        DefaultColWidth = 40
+        DefaultRowHeight = 40
+        FixedCols = 0
+        RowCount = 1
+        FixedRows = 0
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clWhite
+        Font.Height = -11
+        Font.Name = 'Tahoma'
+        Font.Style = [fsBold]
+        ParentFont = False
+        TabOrder = 19
+        OnClick = StringGrid5DblClick
+        OnDblClick = StringGrid5DblClick
+        OnDrawCell = StringGrid4DrawCell
+        ColWidths = (
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40
+          40)
+        RowHeights = (
+          40)
       end
     end
     object TabSheet2: TTabSheet
@@ -523,27 +639,27 @@ object Form2: TForm2
     object TabSheet4: TTabSheet
       Caption = 'TabSheet4'
       ImageIndex = 3
-      object Button14: TButton
-        Left = 248
-        Top = 176
+      object BtnValidateN1E1LookupTable: TButton
+        Left = 488
+        Top = 184
         Width = 377
         Height = 25
         Caption = 'ValidateN1E1 lookup table'
         TabOrder = 0
-        OnClick = Button14Click
+        OnClick = BtnValidateN1E1LookupTableClick
       end
-      object Button15: TButton
-        Left = 248
-        Top = 224
+      object BtnValidateCountTable: TButton
+        Left = 488
+        Top = 232
         Width = 377
         Height = 25
         Caption = 'ValidateCountTable'
         TabOrder = 1
-        OnClick = Button15Click
+        OnClick = BtnValidateCountTableClick
       end
       object SGMinOn: TStringGrid
-        Left = 272
-        Top = 276
+        Left = 512
+        Top = 284
         Width = 128
         Height = 128
         Ctl3D = True
@@ -569,8 +685,8 @@ object Form2: TForm2
           24)
       end
       object SGMinOff: TStringGrid
-        Left = 472
-        Top = 276
+        Left = 712
+        Top = 284
         Width = 128
         Height = 128
         Ctl3D = True
@@ -594,6 +710,92 @@ object Form2: TForm2
           24
           24
           24)
+      end
+      object BtnCreateUnknownLookupTable: TButton
+        Left = 488
+        Top = 136
+        Width = 377
+        Height = 25
+        Caption = 'Create unknown lookup table'
+        TabOrder = 4
+        OnClick = BtnCreateUnknownLookupTableClick
+      end
+      object BtnCreateLookupUsingSolver: TButton
+        Left = 488
+        Top = 488
+        Width = 377
+        Height = 25
+        Caption = 'Create lookup 5x5 -> 3x3'
+        TabOrder = 5
+        OnClick = BtnCreateLookupUsingSolverClick
+      end
+      object Memo2: TMemo
+        Left = 3
+        Top = 16
+        Width = 462
+        Height = 529
+        Lines.Strings = (
+          'Memo2')
+        ScrollBars = ssVertical
+        TabOrder = 6
+      end
+      object BtnTest_TSliceNextSetBit: TButton
+        Left = 488
+        Top = 48
+        Width = 233
+        Height = 25
+        Caption = 'Test TSlice.NextSetBit'
+        TabOrder = 7
+        OnClick = BtnTest_TSliceNextSetBitClick
+      end
+      object BtnTestCalcSouth: TButton
+        Left = 488
+        Top = 88
+        Width = 233
+        Height = 25
+        Caption = 'TestCalcSouth'
+        TabOrder = 8
+        OnClick = BtnTestCalcSouthClick
+      end
+      object BtnTestDeleteBit: TButton
+        Left = 792
+        Top = 16
+        Width = 75
+        Height = 25
+        Caption = 'TestDeleteBit'
+        TabOrder = 9
+        OnClick = BtnTestDeleteBitClick
+      end
+    end
+    object TabSheet5: TTabSheet
+      Caption = 'Unit Tests'
+      ImageIndex = 4
+      object Memo3: TMemo
+        Left = 16
+        Top = 24
+        Width = 425
+        Height = 393
+        Lines.Strings = (
+          'Memo3')
+        TabOrder = 0
+      end
+      object BtnStartUnitTests: TButton
+        Left = 528
+        Top = 176
+        Width = 153
+        Height = 25
+        Caption = 'Start unit tests'
+        TabOrder = 1
+        OnClick = BtnStartUnitTestsClick
+      end
+      object BtnDoFailingTests: TButton
+        Left = 528
+        Top = 232
+        Width = 153
+        Height = 25
+        Caption = 'Do failing tests'
+        TabOrder = 2
+        OnClick = BtnDoFailingTestsClick
       end
     end
   end
@@ -657,7 +859,6 @@ object Form2: TForm2
     FixedRows = 0
     ParentCtl3D = False
     TabOrder = 3
-    OnDblClick = SGDeadDblClick
     ColWidths = (
       25
       25
@@ -681,7 +882,6 @@ object Form2: TForm2
     FixedRows = 0
     ParentCtl3D = False
     TabOrder = 4
-    OnDblClick = SGDeadDblClick
     ColWidths = (
       25
       25
@@ -696,7 +896,31 @@ object Form2: TForm2
     FavoriteLinks = <>
     FileTypes = <>
     Options = [fdoPathMustExist, fdoFileMustExist, fdoNoTestFileCreate]
-    Left = 336
-    Top = 40
+    Left = 1192
+    Top = 24
+  end
+  object FileSaveDialog1: TFileSaveDialog
+    DefaultExtension = 'bin'
+    FavoriteLinks = <>
+    FileTypes = <>
+    Options = []
+    Left = 1196
+    Top = 75
+  end
+  object AppRegistry: TJvAppRegistryStorage
+    StorageOptions.BooleanStringTrueValues = 'TRUE, YES, Y'
+    StorageOptions.BooleanStringFalseValues = 'FALSE, NO, N'
+    StorageOptions.BooleanAsString = False
+    Root = 'Software\LifeSATSearch'
+    SubStorages = <>
+    Left = 924
+    Top = 27
+  end
+  object Taskbar1: TTaskbar
+    TaskBarButtons = <>
+    ProgressMaxValue = 100
+    TabProperties = []
+    Left = 448
+    Top = 24
   end
 end
