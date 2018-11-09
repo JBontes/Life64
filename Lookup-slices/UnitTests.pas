@@ -12,23 +12,57 @@ type
 
   [TestFixture]
   TSliceTests = class(TObject)
-  published
-    procedure DoesTestingStart;
+  private
+    class procedure TestSliceNextBitSet; static;
+    class procedure TimeSlowNSFolding; static;
+    class procedure TimeFastNSFolding; static;
+    class procedure TimeSlowEast; static;
+    class procedure TimeFastEast; static;
     procedure DoesConstructedNESWMatchTheLookupTable;
     procedure DoesConstructedNESWMatchTheLookupTable_NESW;
     class procedure TestUnknownFolding;
     procedure MaskedBitsCreate;
-    class procedure MaskedBitsFastTimer;
-    class procedure MaskedBitsSlowTimer;
-    class procedure FoldRemaining;
-    class procedure TestTMaskBitsCreate;
+    class procedure MaskedBitsFastTimer; static;
+    class procedure MaskedBitsSlowTimer; static;
+    class procedure FoldRemaining; static;
+    class procedure TestTMaskBitsCreate; static;
+  published
+    procedure DoesTestingStart;
+//    class procedure TimeSlowNSFolding; static;
+//    class procedure TimeFastNSFolding; static
+    class procedure TimeMoveFast; static;
+    class procedure TimeMoveSlow; static;
+    class procedure TimeFastNorth; static;
+    class procedure TimeSlowNorth; static;
+    class procedure VerifyFastNorth; static;
+    class procedure ValidateFastEWFolding; static;
+    class procedure ValidateFastNSFolding; static;
+
+    class procedure VerifyFastEast; static;
+    class procedure TimeFastWest; static;
+    class procedure TimeSlowWest; static;
+    class procedure VerifyFastWest; static;
+    class procedure TimeFastEWFolding; static;
+    class procedure TimeSlowEWFolding; static;
+
+
+//    class procedure TestSliceNextBitSet; static;
+//    class procedure ValidateFastNSFolding; static;
+//    procedure DoesConstructedNESWMatchTheLookupTable;
+//    procedure DoesConstructedNESWMatchTheLookupTable_NESW;
+//    class procedure TestUnknownFolding;
+//    procedure MaskedBitsCreate;
+//    class procedure MaskedBitsFastTimer; static;
+//    class procedure MaskedBitsSlowTimer; static;
+//    class procedure FoldRemaining; static;
+//    class procedure TestTMaskBitsCreate; static;
   end;
 
 
 
 implementation
 
-uses
+uses{$IFDEF GpProfile U} GpProf, {$ENDIF GpProfile U}
   System.SysUtils,
   Math,
   Unit2;
@@ -272,10 +306,51 @@ begin
   end; {for i}
 end;
 
+class procedure TSliceTests.TestSliceNextBitSet;
+var
+  TestSlice: TSlice;
+  i,a: integer;
+  Test, Soll, Ist: integer;
+begin
+  TestSlice:= TSlice.FullyUnknown;
+  for i:= -1 to 510 do begin
+    if (i+1 <> TestSlice.NextSetBit(i)) then begin
+      TestSlice.NextSetBit(i);
+    end;
+    Assert.AreEqual(i+1, TestSlice.NextSetBit(i),'Fully unknown');
+  end;
+  Assert.AreEqual(512, TestSlice.NextSetBit(511));
+  TestSlice.Clear;
+  for i:= -1 to 510 do begin
+    if (TestSlice.NextSetBit(i) <= 511) then begin
+      TestSlice.NextSetBit(i);
+    end;
+    Assert.IsTrue(TestSlice.NextSetBit(i) > 511,'Fully clear');
+  end;
+  for a:= 0 to 10000 do begin
+    for i:= 0 to 511 do begin
+      TestSlice.SetBit(i, Odd(Random(512)));
+    end;
+    Test:= Random(513)-1;
+    Soll:= 512;
+    for i:= Test+1 to 511 do begin
+      if (TestSlice.IsBitSet(i)) then begin
+        Soll:= i;
+        break;
+      end;
+    end; {for i}
+    Ist:= TestSlice.NextSetBit(Test);
+    if (Soll <> Ist) and ((Soll = 512) and (Ist <= 511)) then begin
+      Ist:= TestSlice.NextSetBit(Test);
+    end;
+    if (Soll = 512) then Assert.IsTrue((Ist > 511),'Random data')
+    else Assert.AreEqual(Soll, Ist,'Random data');
+  end;
+end;
+
 class procedure TSliceTests.TestTMaskBitsCreate;
 var
   x,y,i: integer;
-  Offset: TOffset;
   MaskedBits: TMaskedBits;
   Part1, Part2: integer;
 begin
@@ -312,8 +387,227 @@ begin
   end;
 end;
 
+const
+  TimingRepetitions = 100000000-1;
+
+class procedure TSliceTests.TimeFastWest;
+var
+  A: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do A.West;
+  Assert.IsTrue(true);
+end;
+
+
+var
+  Data1: array[1..6400] of byte;
+  Data2: array[1..6400] of byte;
+
+class procedure TSliceTests.TimeMoveFast;
+var
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 1000 do Unit2.Move(Data1,Data2, SizeOf(Data1) div 100);
+end;
+
+class procedure TSliceTests.TimeMoveSlow;
+var
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 1000 do System.Move(Data1,Data2, SizeOf(Data1) div 100);
+end;
+
+class procedure TSliceTests.TimeFastEast;
+var
+  A: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do A.East;
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeFastNorth;
+var
+  A: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do A.North;
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeFastNSFolding;
+var
+  N,S: TSlice;
+  Status: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do TSliver.NS(N,S, status);
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeSlowWest;
+var
+  A: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do A.SlowWest;
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeSlowEast;
+var
+  A: TSliver;
+  i: integer;
+begin
+  //for i:= 0 to TimingRepetitions do A.East;
+  Assert.IsTrue(true);
+end;
+
+
+class procedure TSliceTests.VerifyFastWest;
+var
+  A,B: TSlice;
+  S: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 5 do begin
+    S:= Random64;
+    A:= S.SlowWest;
+    B:= S.West;
+    if (A <> B) then begin
+      A:= S.SlowWest;
+      B:= S.West;
+    end;
+    Assert.AreEqual(A,B,'slices do not match');
+  end;
+end;
+
+class procedure TSliceTests.VerifyFastEast;
+var
+  A,B: TSlice;
+  S: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 5 do begin
+    S:= Random64;
+    A:= S.SlowEast;
+    B:= S.East;
+    if (A <> B) then begin
+      A:= S.SlowEast;
+      B:= S.East;
+    end;
+    Assert.AreEqual(A,B,'slices do not match');
+  end;
+end;
+
+class procedure TSliceTests.VerifyFastNorth;
+var
+  A,B: TSlice;
+  S: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 5 do begin
+    S:= Random64;
+    A:= S.SlowNorth;
+    B:= S.North;
+    if (A <> B) then begin
+      A:= S.SlowNorth;
+      B:= S.North;
+    end;
+    Assert.AreEqual(A,B,'slices do not match');
+  end;
+end;
+
+class procedure TSliceTests.TimeSlowNorth;
+var
+  A: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do A.SlowNorth;
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeSlowNSFolding;
+var
+  N,S: TSlice;
+  Status: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions do TSliver.NSSlow(N,S, status);
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeFastEWFolding;
+var
+  N,S: TSlice;
+  Status: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to (TimingRepetitions div 5) do TSliver.EW(N,S, status);
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TimeSlowEWFolding;
+var
+  N,S: TSlice;
+  Status: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to (TimingRepetitions div 5) do TSliver.EWSlow(N,S, status);
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.ValidateFastNSFolding;
+var
+  N,S: TSlice;
+  a,b: TSliver;
+  StatusA, StatusB: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 5 do begin
+    N:= TSlice.Random;
+    S:= TSlice.Random;
+    a:= TSliver.NSSlow(N,S, statusA);
+    b:= TSliver.NS(N,S, statusB);
+    if (a <> b) then begin
+      TSliver.NSSlow(N,S, statusA);
+      TSliver.NS(N,S, statusB);
+    end;
+    Assert.AreEqual(a,b,'TSliver.NSFast produces incorrect results');
+    if (StatusA <> StatusB) then begin
+      TSliver.NSSlow(N,S, statusA);
+      TSliver.NS(N,S, statusB);
+    end;
+    Assert.AreEqual(StatusA,StatusB,'TSliver.NSFast produces incorrect status');
+  end;
+end;
+
+class procedure TSliceTests.ValidateFastEWFolding;
+var
+  E,W: TSlice;
+  a,b: TSliver;
+  StatusA, StatusB: TSliverChanges;
+  i: integer;
+begin
+  for i:= 0 to (TimingRepetitions div 5) do begin
+    E:= TSlice.Random;
+    W:= TSlice.Random;
+    a:= TSliver.EWSlow(E,W, statusA);
+    b:= TSliver.EW(E,W, statusB);
+    if (a <> b) then begin
+      TSliver.EWSlow(E,W, statusA);
+      TSliver.EW(E,W, statusB);
+    end;
+    Assert.AreEqual(a,b,'TSliver.EWFast produces incorrect results');
+    if (StatusA <> StatusB) then begin
+      a:= TSliver.EWSlow(E,W, statusA);
+      b:= TSliver.EW(E,W, statusB);
+    end;
+    Assert.AreEqual(StatusA, StatusB,'TSliver.EW gives incorrect status');
+  end;
+end;
+
 initialization
-
-TDunitx.RegisterTestFixture(TSliceTests);
-
+  TDunitx.RegisterTestFixture(TSliceTests);
 end.

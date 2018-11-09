@@ -49,22 +49,22 @@ object Form2: TForm2
         Height = 13
         Caption = 'Label3'
       end
-      object Label4: TLabel
-        Left = 689
-        Top = 181
-        Width = 149
-        Height = 23
-        Caption = 'No of solutions'
+      object LabelSolutions: TLabel
+        Left = 690
+        Top = 155
+        Width = 82
+        Height = 24
+        Caption = 'Solutions'
         Font.Charset = DEFAULT_CHARSET
         Font.Color = clWindowText
         Font.Height = -20
-        Font.Name = 'Rosewood Std Regular'
+        Font.Name = 'Roboto Lt'
         Font.Style = []
         ParentFont = False
       end
       object Label5: TLabel
         Left = 1098
-        Top = 175
+        Top = 155
         Width = 123
         Height = 23
         Caption = 'Improvement'
@@ -77,28 +77,28 @@ object Form2: TForm2
       end
       object Label6: TLabel
         Left = 959
-        Top = 100
+        Top = 79
         Width = 25
         Height = 13
         Caption = 'Dead'
       end
       object Label7: TLabel
         Left = 1035
-        Top = 100
+        Top = 81
         Width = 23
         Height = 13
         Caption = 'Alive'
       end
       object Label8: TLabel
         Left = 1263
-        Top = 100
+        Top = 81
         Width = 25
         Height = 13
         Caption = 'Dead'
       end
       object Label9: TLabel
         Left = 1339
-        Top = 100
+        Top = 81
         Width = 23
         Height = 13
         Caption = 'Alive'
@@ -201,7 +201,7 @@ object Form2: TForm2
       end
       object StringGrid2: TStringGrid
         Left = 690
-        Top = 204
+        Top = 177
         Width = 403
         Height = 403
         ColCount = 16
@@ -279,7 +279,7 @@ object Form2: TForm2
       end
       object StringGrid3: TStringGrid
         Left = 1098
-        Top = 204
+        Top = 177
         Width = 403
         Height = 403
         ColCount = 16
@@ -360,9 +360,8 @@ object Form2: TForm2
         Top = 95
         Width = 418
         Height = 25
-        Caption = 'Solve a round using slivers'
+        Action = Action_SliverSolveRound
         TabOrder = 13
-        OnClick = BtnSliverSolveRoundClick
       end
       object BtnInitWith_GoE: TButton
         Left = 248
@@ -410,18 +409,18 @@ object Form2: TForm2
         OnClick = BtnApplyCornerLookupTablesClick
       end
       object StringGrid5: TStringGrid
-        Left = 691
-        Top = 613
-        Width = 783
-        Height = 61
+        Left = 690
+        Top = 583
+        Width = 811
+        Height = 77
         ColCount = 80
         DefaultColWidth = 40
-        DefaultRowHeight = 40
+        DefaultRowHeight = 56
         FixedCols = 0
         RowCount = 1
         FixedRows = 0
         Font.Charset = DEFAULT_CHARSET
-        Font.Color = clWhite
+        Font.Color = clBlack
         Font.Height = -11
         Font.Name = 'Tahoma'
         Font.Style = [fsBold]
@@ -512,7 +511,7 @@ object Form2: TForm2
           40
           40)
         RowHeights = (
-          40)
+          56)
       end
     end
     object TabSheet2: TTabSheet
@@ -520,7 +519,7 @@ object Form2: TForm2
       ImageIndex = 1
       object SGSliceLayout: TStringGrid
         Left = 136
-        Top = 96
+        Top = 180
         Width = 1059
         Height = 403
         ColCount = 32
@@ -766,6 +765,26 @@ object Form2: TForm2
         TabOrder = 9
         OnClick = BtnTestDeleteBitClick
       end
+      object ProgressBar1: TProgressBar
+        Left = 3
+        Top = 584
+        Width = 1026
+        Height = 33
+        Max = 1023
+        Smooth = True
+        MarqueeInterval = 1
+        Step = 1
+        TabOrder = 10
+      end
+      object BtnCreateLookup5x5to3x3UsingSpeculativeExploration: TButton
+        Left = 488
+        Top = 528
+        Width = 377
+        Height = 25
+        Caption = 'Create lookup 5x5 -> 3x3 using Speculative Exploration'
+        TabOrder = 11
+        OnClick = BtnCreateLookup5x5to3x3UsingSpeculativeExplorationClick
+      end
     end
     object TabSheet5: TTabSheet
       Caption = 'Unit Tests'
@@ -797,11 +816,19 @@ object Form2: TForm2
         TabOrder = 2
         OnClick = BtnDoFailingTestsClick
       end
+      object Button2: TButton
+        Left = 592
+        Top = 320
+        Width = 75
+        Height = 25
+        Caption = 'Button2'
+        TabOrder = 3
+      end
     end
   end
   object SGAliveDiff: TStringGrid
     Left = 1318
-    Top = 147
+    Top = 122
     Width = 81
     Height = 78
     ColCount = 3
@@ -824,7 +851,7 @@ object Form2: TForm2
   end
   object SGDeadDiff: TStringGrid
     Left = 1231
-    Top = 147
+    Top = 122
     Width = 81
     Height = 78
     ColCount = 3
@@ -847,7 +874,7 @@ object Form2: TForm2
   end
   object SGDead: TStringGrid
     Left = 928
-    Top = 147
+    Top = 122
     Width = 81
     Height = 78
     ColCount = 3
@@ -870,7 +897,7 @@ object Form2: TForm2
   end
   object SGAlive: TStringGrid
     Left = 1015
-    Top = 146
+    Top = 121
     Width = 81
     Height = 78
     ColCount = 3
@@ -920,7 +947,17 @@ object Form2: TForm2
     TaskBarButtons = <>
     ProgressMaxValue = 100
     TabProperties = []
-    Left = 448
-    Top = 24
+    Left = 424
+    Top = 16
+  end
+  object ActionManager1: TActionManager
+    Left = 472
+    Top = 16
+    StyleName = 'Platform Default'
+    object Action_SliverSolveRound: TAction
+      Caption = 'Solve a round using slivers'
+      ShortCut = 112
+      OnExecute = Action_SliverSolveRoundExecute
+    end
   end
 end
