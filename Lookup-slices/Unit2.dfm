@@ -103,14 +103,14 @@ object Form2: TForm2
         Height = 13
         Caption = 'Alive'
       end
-      object Button1: TButton
+      object BtnProcessSliceLookup: TButton
         Left = 3
         Top = 48
         Width = 169
         Height = 25
         Caption = 'Process slice lookup'
         TabOrder = 0
-        OnClick = Button1Click
+        OnClick = BtnProcessSliceLookupClick
       end
       object Memo1: TMemo
         Left = 8
@@ -330,7 +330,7 @@ object Form2: TForm2
       end
       object BtnMinimalSolve: TButton
         Left = 248
-        Top = 95
+        Top = 64
         Width = 233
         Height = 25
         Caption = 'Minimal solve'
@@ -365,7 +365,7 @@ object Form2: TForm2
       end
       object BtnInitWith_GoE: TButton
         Left = 248
-        Top = 126
+        Top = 95
         Width = 233
         Height = 25
         Caption = 'Init with GoE'
@@ -512,6 +512,15 @@ object Form2: TForm2
           40)
         RowHeights = (
           56)
+      end
+      object BtnInitWithGoE2: TButton
+        Left = 248
+        Top = 126
+        Width = 233
+        Height = 25
+        Caption = 'Init with GoE2'
+        TabOrder = 20
+        OnClick = BtnInitWithGoE2Click
       end
     end
     object TabSheet2: TTabSheet
@@ -816,13 +825,14 @@ object Form2: TForm2
         TabOrder = 2
         OnClick = BtnDoFailingTestsClick
       end
-      object Button2: TButton
-        Left = 592
+      object BtnRunSingleTest: TButton
+        Left = 528
         Top = 320
-        Width = 75
+        Width = 153
         Height = 25
-        Caption = 'Button2'
+        Caption = 'Run a single test-If needed'
         TabOrder = 3
+        OnClick = BtnRunSingleTestClick
       end
     end
   end

@@ -28,13 +28,28 @@ type
     class procedure TestTMaskBitsCreate; static;
   published
     procedure DoesTestingStart;
+  private
 //    class procedure TimeSlowNSFolding; static;
 //    class procedure TimeFastNSFolding; static
+    class procedure Time_TSliceAnd; static;
+    class procedure Time_TSliceOr; static;
+    class procedure TSlice_GetBit; static;
+    class procedure TSlice_SetBit; static;
+    class procedure TSlice_IsZero; static;
+    class procedure TSlice_NextSetBit; static;
+    class procedure TSlice_Popcount; static;
+    class procedure TSlice_BitwiseAnd; static;
+    class procedure TSlice_LogicalNot; static;
+    class procedure TSlice_BitwiseOr; static;
+    class procedure TSlice_BitwiseXor; static;
+    class procedure TSlice_Equal; static;
+
+    class procedure DoubleCheckUnknownTable; static;
     class procedure TimeMoveFast; static;
     class procedure TimeMoveSlow; static;
     class procedure TimeFastNorth; static;
     class procedure TimeSlowNorth; static;
-    class procedure VerifyFastNorth; static;
+  published
     class procedure ValidateFastEWFolding; static;
     class procedure ValidateFastNSFolding; static;
 
@@ -42,20 +57,10 @@ type
     class procedure TimeFastWest; static;
     class procedure TimeSlowWest; static;
     class procedure VerifyFastWest; static;
+    class procedure VerifyFastNorth; static;
+    class procedure VerifyFastSouth; static;
     class procedure TimeFastEWFolding; static;
     class procedure TimeSlowEWFolding; static;
-
-
-//    class procedure TestSliceNextBitSet; static;
-//    class procedure ValidateFastNSFolding; static;
-//    procedure DoesConstructedNESWMatchTheLookupTable;
-//    procedure DoesConstructedNESWMatchTheLookupTable_NESW;
-//    class procedure TestUnknownFolding;
-//    procedure MaskedBitsCreate;
-//    class procedure MaskedBitsFastTimer; static;
-//    class procedure MaskedBitsSlowTimer; static;
-//    class procedure FoldRemaining; static;
-//    class procedure TestTMaskBitsCreate; static;
   end;
 
 
@@ -334,7 +339,7 @@ begin
     Test:= Random(513)-1;
     Soll:= 512;
     for i:= Test+1 to 511 do begin
-      if (TestSlice.IsBitSet(i)) then begin
+      if (TestSlice.GetBit(i)) then begin
         Soll:= i;
         break;
       end;
@@ -388,7 +393,36 @@ begin
 end;
 
 const
-  TimingRepetitions = 100000000-1;
+  TimingRepetitions = 1000000-1;//100000000-1;
+
+class procedure TSliceTests.TSlice_NextSetBit;
+var
+  NextA, NextB: integer;
+  S: TSlice;
+  i,j: integer;
+  a,b: integer;
+  previousSet: integer;
+begin
+  for i:= 0 to (TimingRepetitions div 100) do begin
+    S:= TSlice.Random;
+    PreviousSet:= -1;
+    for j:= 0 to 511 do begin
+      if S.GetBit(j) then begin
+        b:= S.NextSetBit(j-1);
+        if (b <> j) then begin
+          b:= S.NextSetBit(j-1);
+        end;
+        Assert.AreEqual(j,b);
+        b:= S.NextSetBit(PreviousSet);
+        if (b <> j) then begin
+          b:= S.NextSetBit(PreviousSet);
+        end;
+        Assert.AreEqual(j,b);
+        PreviousSet:= j;
+      end;
+    end; {for j}
+  end; {for i}
+end;
 
 class procedure TSliceTests.TimeFastWest;
 var
@@ -398,6 +432,61 @@ begin
   for i:= 0 to TimingRepetitions do A.West;
   Assert.IsTrue(true);
 end;
+
+class procedure TSliceTests.DoubleCheckUnknownTable;
+var
+  Soll, Ist, Diff: TSlice;
+  i,a: integer;
+  Offset: TOffset;
+  UnknownBits: TMaskedBits;
+begin
+  //Test N1
+  Offset:= TOffset.Create(0,N1);
+  UnknownBits:= TMaskedBits.Create(0,N1);
+  for i:= 0 to (1 shl (25 - UnknownBits.Count))-1 do begin
+    Ist:= Form2.LookupTable[oCenter, (i shl UnknownBits.Count)];
+    for a:= 1 to (1 shl UnknownBits.Count)-1 do begin
+      Ist:= Ist or Form2.LookupTable[oCenter, (i shl UnknownBits.Count) + a];
+    end; {for a}
+    Soll:= Form2.LookupTable[Offset, i];
+    if (Soll <> Ist) then begin
+      Diff:= Soll xor Ist;
+    end;
+    Assert.AreEqual(Soll, Ist);
+  end; {for i}
+
+  //Test N2
+  Offset:= TOffset.Create(0,N2);
+  UnknownBits:= TMaskedBits.Create(0,N2);
+  for i:= 0 to (1 shl (25 - UnknownBits.Count))-1 do begin
+    Ist:= Form2.LookupTable[oCenter, (i shl UnknownBits.Count)];
+    for a:= 1 to (1 shl UnknownBits.Count)-1 do begin
+      Ist:= Ist or Form2.LookupTable[oCenter, (i shl UnknownBits.Count) + a];
+    end; {for a}
+    Soll:= Form2.LookupTable[Offset, i];
+    if (Soll <> Ist) then begin
+      Diff:= Soll xor Ist;
+    end;
+    Assert.AreEqual(Soll, Ist);
+  end; {for i}
+
+  //Test N3
+  Offset:= TOffset.Create(0,N3);
+  UnknownBits:= TMaskedBits.Create(0,N3);
+  for i:= 0 to (1 shl (25 - UnknownBits.Count))-1 do begin
+    Ist:= Form2.LookupTable[oCenter, (i shl UnknownBits.Count)];
+    for a:= 1 to (1 shl UnknownBits.Count)-1 do begin
+      Ist:= Ist or Form2.LookupTable[oCenter, (i shl UnknownBits.Count) + a];
+    end; {for a}
+    Soll:= Form2.LookupTable[Offset, i];
+    if (Soll <> Ist) then begin
+      Diff:= Soll xor Ist;
+    end;
+    Assert.AreEqual(Soll, Ist);
+  end; {for i}
+
+end;
+
 
 
 var
@@ -453,6 +542,225 @@ var
 begin
   for i:= 0 to TimingRepetitions do A.SlowWest;
   Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.Time_TSliceAnd;
+var
+  A,B,C: TSlice;
+  i,j: integer;
+begin
+  A:= TSlice.Random;
+  B:= TSlice.Random;
+  for i:= 0 to (TimingRepetitions * 100) do begin
+    C:= A and B;
+  end;
+  Assert.AreEqual(not(C), not(B) or not(A));
+end;
+
+class procedure TSliceTests.Time_TSliceOr;
+var
+  A,B,C: TSlice;
+  i,j: integer;
+begin
+  A:= TSlice.Random;
+  B:= TSlice.Random;
+  for i:= 0 to (TimingRepetitions * 100) do begin
+    C:= A or B;
+  end;
+  Assert.AreEqual(not(C), not(B) and not(A));
+end;
+
+class procedure TSliceTests.TSlice_BitwiseAnd;
+var
+  A,B,C,D: TSlice;
+  i,j: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    B:= TSlice.Random;
+    C:= A and B;
+    for j:= 0 to 7 do begin
+      D.data8[j]:= A.data8[j] and B.data8[j];
+    end;
+    Assert.AreEqual(C,D);
+  end;
+end;
+
+class procedure TSliceTests.TSlice_BitwiseOr;
+var
+  A,B,C,D: TSlice;
+  i,j: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    B:= tSlice.Random;
+    C:= A or B;
+    for j:= 0 to 7 do begin
+      D.data8[j]:= A.data8[j] or B.data8[j];
+    end;
+    Assert.AreEqual(C,D);
+  end;
+end;
+
+class procedure TSliceTests.TSlice_BitwiseXor;
+var
+  A,B,C,D: TSlice;
+  i,j: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    B:= tSlice.Random;
+    C:= A xor B;
+    for j:= 0 to 7 do begin
+      D.data8[j]:= A.data8[j] xor B.data8[j];
+    end;
+    Assert.AreEqual(C,D);
+  end;
+end;
+
+class procedure TSliceTests.TSlice_Equal;
+var
+  A,B,C,D: TSlice;
+  i,j: integer;
+  pc: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    B:= A;
+    B.SetBit(Random(511));
+    if (A = B) then for j:= 0 to 7 do begin
+      Assert.IsTrue(A.Data8[j] = B.data8[j]);
+    end else begin
+      pc:= 0;
+      for j:= 0 to 7 do begin
+        Inc(pc, Popcount(A.Data8[j] xor B.data8[j]));
+      end; {for j}
+    end;
+    Assert.IsTrue(A = A);
+  end; {for i}
+end;
+
+class procedure TSliceTests.TSlice_GetBit;
+var
+  A,B: TSlice;
+  i,j: integer;
+  pc: integer;
+  R: integer;
+  Bit: UInt64;
+  Index: integer;
+  BitA, BitB: boolean;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    R:= Random(511);
+    Bit:= 1;
+    Bit:= Bit shl (R and 63);
+    Index:= (R shr 6);
+    BitA:= A.GetBit(R);
+    BitB:= ((A.Data8[Index] and Bit) <> 0);
+    Assert.AreEqual(BitA, BitB);
+  end; {for i}
+end;
+
+class procedure TSliceTests.TSlice_IsZero;
+var
+  A: TSlice;
+  i,j: integer;
+  Test: Uint64;
+  Zero: Uint64;
+begin
+  Zero:= 0;
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    Test:= 0;
+    for j:= 0 to 7 do begin
+      Test:= Test or A.Data8[j];
+    end; {for j}
+    if (A.IsZero) then begin
+      if (Zero <> Test) then begin
+        Test:= 0;
+        for j:= 0 to 7 do begin
+          Test:= Test or A.Data8[j];
+        end; {for j}
+      end;
+      Assert.AreEqual(Zero, Test)
+    end else Assert.IsTrue(0 <> Test);
+  end; {for i}
+end;
+
+class procedure TSliceTests.TSlice_LogicalNot;
+var
+  A,B: TSlice;
+  i,j: integer;
+  Test: Uint64;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    B:= not(A);
+    Test:= 0;
+    for j:= 0 to 7 do begin
+      if (B.Data8[j] <> not(A.Data8[j])) then begin
+        B:= A;
+        A:= not(B);
+        Assert.AreEqual(B.Data8[j], not(A.Data8[j]));
+      end;
+    end; {for j}
+  end; {for i}
+  Assert.IsTrue(true);
+end;
+
+class procedure TSliceTests.TSlice_Popcount;
+var
+  A,B: TSlice;
+  i,j: integer;
+  pc: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    pc:= 0;
+    for j:= 0 to 7 do begin
+      Inc(pc, PopCount(A.data8[j]));
+    end; {for j}
+    if (A.PopCount <> pc) then begin
+      pc:= 0;
+      for j:= 0 to 7 do begin
+        Inc(pc, PopCount(A.data8[j]));
+      end; {for j}
+      pc:= pc - A.PopCount;
+    end;
+    Assert.AreEqual(A.PopCount, pc);
+  end; {for i}
+end;
+
+class procedure TSliceTests.TSlice_SetBit;
+var
+  A,B: TSlice;
+  i,j: integer;
+  pc: integer;
+  R: integer;
+  Bit: UInt64;
+  Index: integer;
+begin
+  for i:= 0 to TimingRepetitions do begin
+    A:= TSlice.Random;
+    R:= Random(511);
+    Bit:= 1;
+    Bit:= Bit shl (R and 63);
+    Index:= (R shr 6);
+    B:= A;
+    B.Data8[index]:= B.Data8[index] or Bit;
+    A.SetBit(R);
+    if not(A = B) then begin
+      A.SetBit(R);
+    end;
+    Assert.AreEqual(A,B);
+    B.Data8[index]:= B.Data8[index] and not(Bit);
+    A.SetBit(R, false);
+    if not(A = B) then begin
+      A.SetBit(R,false);
+    end;
+    Assert.AreEqual(A,B);
+  end; {for i}
 end;
 
 class procedure TSliceTests.TimeSlowEast;
@@ -519,6 +827,24 @@ begin
   end;
 end;
 
+class procedure TSliceTests.VerifyFastSouth;
+var
+  A,B: TSlice;
+  S: TSliver;
+  i: integer;
+begin
+  for i:= 0 to TimingRepetitions div 5 do begin
+    S:= Random64;
+    A:= S.SlowSouth;
+    B:= S.South;
+    if (A <> B) then begin
+      A:= S.SlowSouth;
+      B:= S.South;
+    end;
+    Assert.AreEqual(A,B,'slices do not match');
+  end;
+end;
+
 class procedure TSliceTests.TimeSlowNorth;
 var
   A: TSliver;
@@ -544,7 +870,7 @@ var
   Status: TSliverChanges;
   i: integer;
 begin
-  for i:= 0 to (TimingRepetitions div 5) do TSliver.EW(N,S, status);
+  for i:= 0 to (TimingRepetitions) do TSliver.EW(N,S, status);
   Assert.IsTrue(true);
 end;
 
@@ -554,7 +880,7 @@ var
   Status: TSliverChanges;
   i: integer;
 begin
-  for i:= 0 to (TimingRepetitions div 5) do TSliver.EWSlow(N,S, status);
+  for i:= 0 to (TimingRepetitions) do TSliver.EWSlow(N,S, status);
   Assert.IsTrue(true);
 end;
 
@@ -590,7 +916,7 @@ var
   StatusA, StatusB: TSliverChanges;
   i: integer;
 begin
-  for i:= 0 to (TimingRepetitions div 5) do begin
+  for i:= 0 to (TimingRepetitions) do begin
     E:= TSlice.Random;
     W:= TSlice.Random;
     a:= TSliver.EWSlow(E,W, statusA);

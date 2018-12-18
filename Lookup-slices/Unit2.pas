@@ -12,12 +12,17 @@ uses
   Vcl.ActnMan;
 
 const
-  cStanding = true;
-  cFlat = false;
+  cStanding = true; //deprecated;
+  cFlat = false; //deprecated;
 
 type
   PSlice = ^TSlice;
 
+  /// <summary>
+  ///  A sliver is the 2x3 overlap between two 3x3 slices
+  ///  This is a partial record, the rest of the methods
+  ///  are listed in TSliverHelper
+  /// </summary>
   TSliver = record
   public
     class operator BitwiseAnd(const a, b: TSliver): TSliver;
@@ -34,38 +39,108 @@ type
       1: (bytes: array [0 .. 7] of byte);
   end;
 
+  /// <summary>
+  ///  When we create a sliver, it is because we want to reduce
+  ///  the number of allowed states.
+  ///  At this point we might as well track if there are any changes
+  ///  and if we have stumbled on a invalid slice (zero allowed states).
+  ///  rather than performing a seperate test.
+  /// </summary>
   TSliverChanges = record
   strict private type
     TSliverState = (scUnchanged, scChanged, scInvalid);
   public
+    /// <summary>
+    ///  Return true if changed or invalid, false if unchanged.
+    /// </summary>
     class operator explicit(a: TSliverChanges): boolean; // Changed/unchanged (note that here ssZero = ssChanged)
+    /// <summary>
+    ///  Return TSliverChanges.Unchanged if false, TSliverChanges.Changed if true.
+    /// </summary>
     class operator Implicit(a: boolean): TSliverChanges;
+    /// <summary>
+    ///  a=Unchanged or true => a:= Changed
+    ///  a=Unchanged or false => a:= Unchanged
+    ///  a=Changed or whatever => a:= changed
+    ///  a=invalid or whatever => a:= Invalid
+    /// </summary>
     class operator LogicalOr(const a: TSliverChanges; const b: boolean): TSliverChanges;
+    /// <summary>
+    ///  If b is invalid then add invalid to the result.
+    ///  otherwise return a
+    /// </summary>
     class operator BitwiseAnd(const a: TSliverChanges; const b: TSliver): TSliverChanges;
+    /// <summary>
+    ///  Result:= a or b (I did not use OR, because to avoid triggering an implicit
+    ///  conversion of a TSliverChanges into a boolean)
+    /// </summary>
     class operator Add(const a, b: TSliverChanges): TSliverChanges;
+    /// <summary>
+    ///  Used to check if we should stop overlapping slices.
+    /// </summary>
     class operator Add(a: integer; const b: TSliverChanges): integer;
     class operator NotEqual(a,b: TSliverChanges): boolean;
+    /// <summary>
+    ///  Return a new TSliverChanges containing an Invalid state.
+    /// </summary>
     class function Invalid: TSliverChanges; static;
+    /// <summary>
+    ///  Return a new TSliverChanges containing an Unchanged state
+    /// </summary>
     class function UnChanged: TSliverChanges; static;
+    /// <summary>
+    ///  Return a new TSliverChanges containing a changed state.
+    /// </summary>
     class function Changed: TSliverChanges; static;
 
     function IsValid: boolean;
+    /// <summary>
+    ///  Result:= (Self = scChanged)
+    /// </summary>
     function KeepGoing: boolean;
+    /// <summary>
+    ///  Result:= (Self = scInvalid)
+    /// </summary>
     function IsInvalid: boolean;
+    /// <summary>
+    ///  Result:= (Self = scChanged) or (Self = scInvalid)
+    /// </summary>
     function IsChanged: boolean;
+    /// <summary>
+    ///  Result:= (Self = scUnChanged)
+    /// </summary>
     function IsUnchanged: boolean;
   private
     case integer of
-      1: (AsBoolean: boolean);
+      1: (AsBoolean: boolean); //make sure to always load this with a pure boolean 1=true, 0 = false.
       2: (AsByte: byte);
   end;
 
+  /// <summary>
+  ///  In a 5x5 future bitmap we can have unknown pixels.
+  ///  We track overlaps between two 5x5 rects, one known and one unknown.
+  ///  The unknown bitmap is at the bottom and the known bitmap at the top.
+  ///  The overlap were both rects fully overlap is 0,0.
+  ///  This means the bitmap is fully known (the top, known, bitmap wins).
+  ///  From 0,0 we offset to the north and south and east and west.
+  /// </summary>
   TMaskedBitsIndex = -3..3;
 
+  /// <summary>
+  ///  In a 5x5 bitmap we can have a maximum of 25 masked pixels.
+  ///  (tracked in FData).
+  ///  Masked pixels can be unknown, but we reuse it for other purposes as well.
+  ///  FLength = number of masked pixels
+  ///  FData = indexes of masked pixels (0 = topright, 24 = bottomleft)
+  /// </summary>
   TMaskedBits = record
   public
     FLength: integer;
     FData: array[0..24] of byte;
+    /// <summary>
+    ///  Return the union of A and B.
+    ///  Make sure the result is sorted
+    /// </summary>
     class operator Add(const A,B: TMaskedBits): TMaskedBits;
     function GetItems(index: integer): integer;
     property Length: integer write FLength;
@@ -73,19 +148,58 @@ type
     class operator Implicit(const A: array of byte): TMaskedBits;
     class operator Implicit(const A: TMaskedBits): TArray<byte>;
     class operator Equal(const a, b: TMaskedBits): boolean;
+    /// <summary>
+    ///  Take a KnownMask (a set of bits) and in that KnownMask
+    ///  zero out the bits listed in FData, return that Mask.
+    /// </summary>
     function FilterKnownBits(KnownMask: integer): integer;
+    /// <summary>
+    ///  EW and NS is the offset as described in TMaskedBitsIndex.
+    ///  use this to build a list of all pixels that are unknown (or
+    ///  rather all pixels where the two rects do not overlap)
+    /// </summary>
     constructor Create(EW, NS: TMaskedBitsIndex); overload;
+    /// <summary>
+    ///  UnknownBits is a bitset where every set bit denotes a pixel
+    ///  where two 5x5 rects do not overlap.
+    ///  the LSB = 0 = topright and the MSB = 24 = bottomleft.
+    /// </summary>
     constructor Create(UnknownBits: integer); overload;
-    function Count: integer;
+    property Count: integer read FLength;
     property Items[index: integer]: integer read GetItems; default;
   end;
 
+  /// <summary>
+  ///  A slice is a truthtable or a set of bits containing all possible immediate pasts
+  ///  for a single future cell.
+  ///  A 3x3 grid. A 3x3 grid can have 2^(3x3) = 512 possible constellations.
+  ///  Constellation 0 = all dead cells.
+  ///  Constellation 511 = all live cells.
+  ///  The main metric for a slice is its population count.
+  ///  If popcount = 1, then there is only a single allowed constellation and we
+  ///  will have found a specific past for our given future.
+  ///  If popcount = 0, then that future is not allowed and we have a contradiction
+  ///  meaning we either have UNSAT or must backtrack.
+  ///  If popcount > 1, then we have multiple possible pasts.
+  ///  The future for a given slice can be determined by comparing it against the
+  ///  norm slice for all 140 constellations that generate a future ON cell,
+  ///  or the norm slice for all 372 constellations that generate a future OFF cell.
+  ///  If popcount (self AND norm140) = 0 then the future = ON
+  ///  If popcount (self AND norm372) = 0 then the future = OFF
+  ///  else the future is unknown.
+  /// </summary>
   TSlice = record
   private
-    class var RandomSeed: int64;
+    class var RandomSeed: uint64;
     class constructor InitRandomSeed;
   public
+    /// <summary>
+    ///  Used for sorting, the actual order is immaterial
+    /// </summary>
     class operator GreaterThan(const a, b: TSlice): boolean;
+    /// <summary>
+    ///  Used for sorting, the actual order is immaterial
+    /// </summary>
     class operator LessThan(const a, b: TSlice): boolean;
     class operator Equal(const a, b: TSlice): boolean;
     class operator NotEqual(const a, b: TSlice): boolean;
@@ -93,28 +207,69 @@ type
     class operator BitwiseXor(const a, b: TSlice): TSlice;
     class operator BitwiseOr(const a, b: TSlice): TSlice;
     class operator LogicalNot(const a: TSlice): TSlice;
+    /// <summary>
+    ///  Returns a new slice with all 1's (all constellations are allowed)
+    /// </summary>
     class function FullyUnknown: TSlice; static;
+    /// <summary>
+    ///  Returns a new slice with all 0's (no constellations are allowed, a contradicton)
+    /// </summary>
     class function FullyEmpty: TSlice; static;
+    /// <summary>
+    ///  Returns a random slice for unit testing
+    /// </summary>
     class function Random: TSlice; static;
+    /// <summary>
+    ///  True if popcount(self) = 0.
+    /// </summary>
     function IsZero: boolean;
+    /// <summary>
+    ///  Count the number of allowed constellations
+    /// </summary>
     function PopCount: integer;
+    /// <summary>
+    ///  Used for visualisation purposes
+    /// </summary>
     function CountDead(Pixel: integer): integer;
+    /// <summary>
+    ///  Used for visualization purposes
+    /// </summary>
     function CountAlive(Pixel: integer): integer;
+    /// <summary>
+    ///  Used for visualization purposes
+    /// </summary>
     function Print: string;
-    function IsBitSet(Bit: integer): boolean;
+    /// <summary>
+    ///  Return the allowed states as a listing of constellation indexes.
+    ///  Used to visualize constellations
+    /// </summary>
     function GetStates: TArray<integer>;
+    /// <summary>
+    ///   Debugging
+    /// </summary>
     class function Print5x5(item: integer): string; static;
     /// <summary>
     ///  Transpose a slice using the input array to transpose the bits
     /// </summary>
     class function GetReordering(Order: TArray<integer>; const Input: TArray<integer>): TArray<integer>; static;
+    /// <summary>
+    ///  Is bit Index set?
+    /// </summary>
     function GetBit(Index: integer): boolean;
+    /// <summary>
+    ///  Set or a Reset bit x
+    /// </summary>
     procedure SetBit(Index: integer; value: boolean = true);
     /// <summary>
-    ///  Empty the slice and set only a single bit.
+    ///  Empty the slice (reset all bits) and set only a single bit.
     ///  This is mainly used in the speculative exploration part
     /// </summary>
     procedure ForceSingleBit(Index: integer);
+    /// <summary>
+    ///  Do a matrix transpose on a slice
+    ///  This is not really used, because we don't need it.
+    ///  This is an expensive operation!
+    /// </summary>
     procedure ReorderSlice(const Reordering: TArray<integer>);
     /// <summary>
     ///  The bits in a slice are numbered from 0 to 511.
@@ -127,40 +282,169 @@ type
     /// </returns>
     function NextSetBit(previous: integer): integer;
     /// <summary>
+    ///  Finds the next set bit (using NextSetBit internally) and returns a bitmap
+    ///  representation of that constellation.
+    ///  This looks like
+    ///  MSB          LSB
+    ///  -------------210  (low 16 bits)
+    ///  -------------543
+    ///  -------------876  (high 16 bits)
+    ///  ----------------  (top 16 bits are 0).
+    ///  This can be shifted around as needed, depending on the location of the slice.
+    ///  previous is updated with the found position, so that this function can be called
+    ///  repeatedly to generate a list of bitmaps.
+    /// </summary>
+    function GetBitmap(out KnownBitmap, UnknownBitmap: UInt64): TSliverChanges;
+    /// <summary>
     ///  Fill the slice with all zeros
     /// </summary>
     procedure Clear;
-
-  private
+  {$IFDEF TESTINSIGHT} public {$ELSE}
+  private {$ENDIF}
     case integer of
-      9: (Sliver: array [0 .. 7] of TSliver);
+      9: (Sliver: array [0 .. 7] of TSliver); //used in some speed-tricks (a sliver is really an int64)
       8: (Data8: array [0 .. 7] of uint64);
       4: (Data4: array [0 .. (64 div 4) - 1] of uint32);
       2: (Data2: array [0 .. (64 div 2) - 1] of word);
       1: (bytes: array [0 .. 63] of byte);
   end;
 
+  TSliceHelper = record helper for TSlice
+  private
+    /// <summary>
+    ///  A slice holds 9 pixels, this is the mask for every single pixel
+    ///  in a slice.
+    ///  Pixel 0 (topright) = 010101010101....
+    ///  Pixel 1 (topmiddle) = 001100110011....
+    ///  Pixel 2 (topleft) = 0000111100001111....
+    ///  etc.
+    /// </summary>
+    class var BitMask: array[0..8] of TSlice;
+    class constructor Init;
+  public
+  end;
+
+  /// <summary>
+  ///  Part2 of the Sliver.
+  ///  All these routines transform slice into a sliver or visa versa.
+  ///  We can transform sliver into a slice by assuming the added pixels are all allowed states (ORing)
+  ///  We transform a slice into a sliver (ORing)
+  ///  Both transformations tend in INCREASE the number of allowed states.
+  ///  States are DECREASED by ANDing two slivers.
+  ///  The Slow routines are the SOLL's for unit testing
+  ///  The other routines are optimized ones for the Gridwalker algorithm.
+  /// </summary>
   TSliverHelper = record helper for TSliver
+    /// <summary>
+    ///  Add the east pixels 0, 3, 6
+    /// </summary>
     function SlowEast: TSlice;
+    /// <summary>
+    ///  Add the east pixels 0, 3, 6
+    /// </summary>
     function East: TSlice;
+    /// <summary>
+    ///  Add the west pixels 2, 5, 8
+    /// </summary>
     function SlowWest: TSlice;
+    /// <summary>
+    ///  Add the west pixels 2, 5, 8
+    /// </summary>
     function West: TSlice;
+    /// <summary>
+    ///  Add the north pixels 0, 1, 2
+    /// </summary>
     function SlowNorth: TSlice;
+    /// <summary>
+    ///  Add the north pixels 0, 1, 2
+    /// </summary>
     function North: TSlice;
+    /// <summary>
+    ///  Add the south pixels 6, 7, 8
+    /// </summary>
     function SlowSouth: TSlice;
+    /// <summary>
+    ///  Add the south pixels 6, 7, 8
+    /// </summary>
     function South: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a North and then an East
+    ///  No longer used, because it is not needed
+    /// </summary>
     function NorthEast: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a North and then a West
+    ///  No longer used, because it is not needed
+    /// </summary>
     function NorthWest: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a South and then a West
+    ///  No longer used, because it is not needed
+    /// </summary>
     function SouthWest: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a South and then an East
+    ///  No longer used, because it is not needed
+    /// </summary>
     function SouthEast: TSlice;
+    /// <summary>
+    ///  Take two neighboring slices N and S.
+    ///  Transform N -> SliverS, transform S -> SliverN.
+    ///  Now SliverS and SliverN fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverN = SliverS = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    /// </summary>
     class function NSSlow(const North, South: TSlice; out Changed: TSliverChanges): TSliver; static;
-    class function NS(const North, South: TSlice; out Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices N and S.
+    ///  Transform N -> SliverS, transform S -> SliverN.
+    ///  Now SliverS and SliverN fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverN = SliverS = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    /// </summary>
+    class function NS(const North, South: TSlice; out Changed: TSliverChanges): TSliver; static; inline;
+    /// <summary>
+    ///  Take two neighboring slices E and W.
+    ///  Transform E -> SliverW, transform W -> SliverE.
+    ///  Now SliverW and SliverE fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverE = SliverW = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    /// </summary>
     class function EWSlow(const East, West: TSlice; out Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices E and W.
+    ///  Transform E -> SliverW, transform W -> SliverE.
+    ///  Now SliverW and SliverE fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverE = SliverW = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    /// </summary>
     class function EW(const East, West: TSlice; out Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices SE and NW.
+    ///  Transform SE -> Mini-SliverNW, transform NW -> mini-SliverSE.
+    ///  Now Mini-SliverNW and Mini-SliverSE fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverSE = SliverNW = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    ///  No longer used
+    /// </summary>
     class function NWSE(const NorthWest, SouthEast: TSlice; var Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices NE and SW.
+    ///  Transform NE -> Mini-SliverSW, transform SW -> mini-SliverNE.
+    ///  Now Mini-SliverNE and Mini-SliverSW fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverSW = SliverNE = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    ///  No longer used
+    /// </summary>
     class function NESW(const NorthEast, SouthWest: TSlice; var Changed: TSliverChanges): TSliver; static;
   private
   end;
+
+
 
 //  /// <summary>
 //  ///  Not implemented yet, not sure what this does.
@@ -178,6 +462,13 @@ type
 //      1: (bytes: array [0 .. 2047] of byte);
 //  end;
 
+  /// <summary>
+  ///  Deprecated, a superslice is the union between to slices, a 4x3 area.
+  ///  However, unexpectatly taking the intersection (a 2x3 slice) performs
+  ///  exactly the same as taking the union (a 4x3).
+  ///  the latter is much more expensive, so we drop this.
+  ///  Only the lookUp functions are still used, I should probably refactor this
+  /// </summary>
   TSuperSlice = record
   private
     class var Lookup0: array [byte] of word;
@@ -206,6 +497,14 @@ type
       1: (bytes: array [0 .. 511] of byte);
   end;
 
+  /// <summary>
+  ///  A offset is an alias for the lookuptable to choose from when selecting a
+  ///  table to lookup future 5x5 bitmaps to current slices AND we have unknown
+  ///  pixels.
+  ///  It contains 2 dimensions, a x-offset (-3..3) and an y-offset(-3..3).
+  ///  0,0 gets you the normal 2GB lookuptable with no unknown pixels
+  ///  I should make this a record, so that it cannot be aliased by an integer.
+  /// </summary>
   TOffset = type integer;
   TUnknownIndex = -3 .. 3;
 
@@ -221,38 +520,99 @@ const
   oNorthWest = 8;
 
 type
+  /// <summary>
+  ///  class helper for the index into the unknown lookup tables
+  /// </summary>
   TOffsetHelper = record helper for TOffset
+    /// <summary>
+    ///  transform the lookup table index into a list of unknown pixels
+    /// </summary>
     function ToMaskedBits: TMaskedBits;
+    /// <summary>
+    ///  Get the correct lookup table, given an x and y offset
+    /// </summary>
     class function Create(x,y: integer): TOffset; static;
+    /// <summary>
+    ///  Extract the x and y offset.
+    ///  Note that positive offsets are to the East and North and negative offsets to the West and South
+    /// </summary>
     procedure XY(out E_offset, N_offset: integer);
   end;
 
 type
+  /// <summary>
+  ///  A -compressed- lookup table
+  ///  The known lookup table has 2^25 entries, generating 1 slice for every future 5x5 bitmap.
+  ///  There are 48 unknown lookup tables. Totaling 270MB in size.
+  ///  The unknown lookup tables are smaller, because they have fewer entries, every unknown pixel
+  ///  halves the number of entries the largest table here has 2^20 entries = 64MB x 4 = 256 MB,
+  ///  after that the size goes down pretty fast.
+  /// </summary>
   TLookupTable = record
   strict private
     procedure SetUnknownItems(E_offset, N_offset: TUnknownIndex; Index: uint32; const value: TSlice);
     function GetUnknownItems(E_offset, N_offset: TUnknownIndex; Index: uint32): TSlice;
-    property UnknownItems[E_offset: TUnknownIndex; N_offset: TUnknownIndex; index: uint32]: TSlice read GetUnknownItems
-      write SetUnknownItems;
+    property UnknownItems[E_offset: TUnknownIndex; N_offset: TUnknownIndex; index: uint32]: TSlice read GetUnknownItems write SetUnknownItems;
   private
+    /// <summary>
+    ///  The lookup table is 'compressed' (i.e. deduplicated). The index contains 2^25 items
+    ///  which points into the actual data.
+    ///  We have 5 indexes, different indexes for different purposes
+    ///  the stride is the distance to the next index.
+    /// </summary>
     class var IndexStride: integer;
+    /// <summary>
+    ///  There are 48 unknown tables, this 2d array contains a pointer to the start-index of every table.
+    /// </summary>
     class var UnknownOffset: array [TUnknownIndex, TUnknownIndex] of integer;
+    /// <summary>
+    ///  The number of entries in all unknown table
+    /// </summary>
     class var UnknownSize: uint64;
     class constructor Init;
-
   private
+    /// <summary>
+    ///  Known data
+    /// </summary>
     FData: TArray<TSlice>;
     FIndex: TArray<integer>;
+    /// <summary>
+    ///  Unknown data, note there is no index, because this table is 'small'
+    /// </summary>
     FUnknownData: TArray<TSlice>;
+    /// <summary>
+    ///  A table containing the number of 7x7 ancestors for every 5x5 future bitmap.
+    /// </summary>
     FCountData: TArray<uint64>;
-    // FUnknownIndex: TArray<integer>;
+    // FUnknownIndex: TArray<integer>; //not used, no index needed for a small table.
+    /// <summary>
+    ///  Because we start with a 7x7 bitmap and for all of these calculate the future 5x5,
+    ///  we do not have to limit outselves to the center 3x3 slice, we can also extract an offsetted
+    ///  3x3 slice from the original 7x7.
+    ///  This allows us to further pre-prune the problem space.
+    ///  Unfortunaty, this does not work correctly if there are unknown pixels in the 5x5.
+    ///  For now this must NOT be used, until I can add code to check for unknown pixels.
+    /// </summary>
     FCornerData: TArray<TSlice>;
     FCornerIndex: TArray<integer>;
     function GetItems(Offset: TOffset; Index: integer): TSlice;
     procedure SetItems(Offset: TOffset; Index: integer; const value: TSlice);
+    /// <summary>
+    ///  Load the known slice data from disk
+    /// </summary>
     procedure LoadSliceData(const Filename: string; var SliceData: TArray<TSlice>);
+    /// <summary>
+    ///  Load the known slice index data from disk
+    /// </summary>
     procedure LoadIndex(const Filename: string; var IndexData: TArray<integer>);
+    /// <summary>
+    ///  Load the known slice 7x7 ancestor count from disk
+    ///  the result is a table with uint64's (some counts do not fit in a int32).
+    /// </summary>
     procedure LoadCountData(const Filename: string);
+    /// <summary>
+    ///  We can recreate a close approximation of the slice data, save this to disk.
+    /// </summary>
     procedure SaveSliceData(const Filename: string; const SliceData: TArray<TSlice>);
   public
     procedure LoadMainIndex(const Filename: string);
@@ -260,22 +620,107 @@ type
     procedure LoadCornerIndex(const Filename: string);
     procedure LoadCornerData(const Filename: string);
     procedure LoadUnknownData(const Filename: string);
+    /// <summary>
+    ///  Used to check to we have already loaded data from disk.
+    /// </summary>
     function HasCornerData: boolean;
     function HasSliceData: boolean;
     function HasCountData: boolean;
     function HasUnknownData: boolean;
+    /// <summary>
+    ///  Unified index property `[] operator in c++` for both known and unknown tables
+    /// </summary>
     property Items[Offset: TOffset; index: integer]: TSlice read GetItems write SetItems; default;
   end;
 
-
-
-
+  /// <summary>
+  ///  esCheap, remove a constellation from a slice
+  ///  esExpensive, take all valid grids and OR these grids together.
+  ///  The expensive strategy removes a **lot** more states.
+  /// </summary>
   TExplorationStrategy = (esCheap, esExpensive);
+
+  /// <summary>
+  ///  When pasting data, make sure we correctly clip stuff at the edges.
+  ///  The TOutOfBounds helps to make sure only fragments that fit inside the region of a TGridBitmap
+  ///  are processed. (see directly below)
+  ///  An aliased TPoint structure. This is 0,0 if the fragment fits wholly inside
+  ///  the bitmap, x or y is negative if it extends beyond the 0 point and
+  ///  positive (starting with 1) if any part extends beyond pixel 15.
+  /// </summary>
+  TOutOfBounds = record
+  private
+    FData: TPoint;
+  public
+    class operator Implicit(a: TPoint): TOutOfBounds;
+    class operator Implicit(a: TOutOfBounds): TPoint;
+    class operator Add(a: TRect; b: TOutOfBounds): TRect;
+    property x: integer read FData.x write FData.x;
+    property y: integer read FData.y write FData.y;
+  end;
+
+  {TODO -oJB -cTGridBitmap : Not yet implemented}
+  /// <summary>
+  ///  A TGridBitmap is a 16x16 pixel single bit per pixel sub-bitmap
+  ///  It consists of either a single AVX2 qqword, or 2 AVX dqwords.
+  ///  Every qword covers 16 pixels wide and 4 pixels tall.
+  ///  The pixels are numbered like so
+  ///  x=15                         x=0
+  ///  0F0E0D0C0B0A09080706050403020100  y=0
+  ///  1F1E1D1C1B1A19181716151413121110
+  ///  2F2E2D2C2B2A29282726252423222120
+  ///  3F3E3D3C3B3A39383736353433323130 y=3
+  ///
+  ///  The qwords are ordered like so
+  ///  0  y=0
+  ///  1
+  ///  2
+  ///  3  y=15
+  ///  This is used to verify a potential past pattern against a known future.
+  ///  The idea is that we calculate all past data, this generates a future bitmap
+  ///  (Life is forward deterministic)
+  ///  We then clip off the unknown parts (the future lightcone of the current unknown pixels)
+  ///  Next we take the known future, perform the same clipping
+  ///  and XOR the two. If the result = 0, All good, if not then that past is invalid.
+  /// </summary>
+  TGridBitmap = record
+  private
+    FKnownData: array[0..3] of Uint64;
+    FUnknownData: array[0..3] of Uint64;
+  public
+    /// <summary>
+    ///  PasteFragments inserts a 3x3 snippet with known and unknown data into the bitmap
+    ///  The fragment looks the this
+    ///  -------------210  LS 16 bits (only bottom 3 are relevant)
+    ///  -------------543
+    ///  -------------876
+    ///  ----------------  MS 16 bits (none are relevant)
+    /// </summary>
+    /// <returns>
+    ///  A aliased TPoint structure. This is 0,0 if the fragment fits wholly inside
+    ///  the bitmap, x or y is negative if it extends beyond the 0 point and
+    ///  positive (starting with 1) if any part extends beyond pixel 15.
+    /// </returns>
+    function PasteFragment(p: TPoint; KnownFragment, UnknownFragment: Uint64): TOutOfBounds;
+    {TODO -oJB -cTGridBitmap.Validate : Not yet implemented}
+    /// <summary>
+    ///  1. Calculate the future of Self.
+    ///  2. Clip off the unknown parts
+    ///  3. Clip off the unknown parts of reference
+    ///  4. XOR 2. and 3.
+    ///  Result = true if 4.=0, or false otherwise.
+    /// </summary>
+    function Validate(const Reference: TGridBitmap): boolean;
+    function UnknownFuture: TGridBitmap;
+    class function Empty: TGridBitmap; static;
+  end;
+
 
   /// <summary>
   ///  A grid is a grid of slices.
   /// </summary>
   TGrid = record
+  //Enumerator support, used in `for in` constructs
   public type
     PGrid = ^TGrid;
     TGridEnumerator = record
@@ -288,10 +733,15 @@ type
       function GetCurrent: TSlice; inline;
       property Current: TSlice read GetCurrent;
     end;
-
   private
+    /// <summary>
+    ///  array[FSizeX,FSizeY] of TSlice (remember by design slices overlap)
+    /// </summary>
     FData: TArray<TSlice>;
     FSizeX, FSizeY: integer;
+    /// <summary>
+    ///  Is the grid free of invalid slices?
+    /// </summary>
     FIsValid: boolean;
     function GetSlice(const Coordinate: TPoint): TSlice; overload;
     procedure SetSlice(const Coordinate: TPoint; const Value: TSlice); overload;
@@ -299,8 +749,35 @@ type
     procedure SetSlice(x,y: integer; const Value: TSlice); overload;
     function GetSlice(i: integer): TSlice; overload; inline;
     procedure SetSlice(i: integer; const Value: TSlice); overload;
+    /// <summary>
+    ///  The core of the gridwalker algorithm
+    ///  Take two slices (x,y) and (x+1,y) where all coordinates < MaxX <MaxY
+    ///  and AND their overlapping slivers, expand the resuting sliver
+    ///  back into two slices and AND that with the original slices.
+    ///  Do the same for slices (x,y) and (x,y+1).
+    /// </summary>
     function SliverSolve(x, y, MaxX, MaxY: integer): TSliverChanges;
+    /// <summary>
+    ///  for (x=Min;x<Max;x++) {for (y=Min;y<Max;y++) {SliverSolve(x,y,Max)}}
+    ///  for (x=Max;x>Min;x++) {for (y=Max;y<Min;y++) {SliverSolve(x,y,Max)}}
+    ///  By working from topleft to bottomright and back again we propagate changes
+    ///  through the grid much faster then just repeating topleft->bottomright over and over.
+    ///  This speeds up things by a factor 4 or 5.
+    /// </summary>
     function DoASliverRun: TSliverChanges;
+  public type
+    /// <summary>
+    ///  After the basic overlapping of gridwalker has run out of steam
+    ///  we start speculative exploring.
+    ///  We select a pivot (using a heuristic)and split the grid into
+    ///  popcount(pivot) subgrids.
+    ///  We solve each subgrid recursively.
+    ///  TSolveMe determines the strategy to follow after Splitting.
+    ///  smNoSolving -> do nothing, just split.
+    ///  smSolveFirst -> Solve all Sub grid, but do not remove anything
+    ///  smSolveAndExcludeInvalids -> Solve all Sub grid, only return valid grids.
+    /// </summary>
+    TSolveMe = (smNoSolving, smSolveFirst, smSolveAndExcludeInvalids);
   public
     /// <summary>
     ///  initialize a new Grid with dimensions x and y.
@@ -358,58 +835,139 @@ type
     function IsValid: boolean;
     function IsInvalid: boolean;
     /// <summary>
-    ///  Return x grids, where x is the popcount of the specified slice.
-    ///  if SolveFirst is true, it will only return grids that have a valid solution.
+    ///  After the basic overlapping of gridwalker has run out of steam
+    ///  we start speculative exploring.
+    ///  We select a pivot (using a heuristic)and split the grid into
+    ///  popcount(pivot) subgrids.
+    ///  We solve each subgrid recursively.
+    ///  TSolveMe determines the strategy to follow after Splitting.
+    ///  smNoSolving -> do nothing, just split.
+    ///  smSolveFirst -> Solve all Sub grid, but do not remove anything
+    ///  smSolveAndExcludeInvalids -> Solve all Sub grid, only return valid grids.
     /// </summary>
-    function Split(const Coordinate: TPoint; SolveFirst: boolean = false): TArray<TGrid>;
+    function Split(const Coordinate: TPoint; SolveMe: TSolveMe): TArray<TGrid>;
     /// <summary>
     ///  bitwise OR all the given grids together in a single grid
     /// </summary>
     function Join(const Grids: TArray<TGrid>): TGrid;
+    /// <summary>
+    ///  The sum of all popcounts in all slices in the grid.
+    ///  (Yes the total number of states is the PRODUCT of all popcounts in the grid,
+    ///   but that's a BigNum and this is a quick-and-dirty approximation).
+    /// </summary>
     function PopCountSum: integer;
     function GetEnumerator: TGridEnumerator;
+    /// <summary>
+    ///  Creates a 16x16 bitmap starting at the given coordinates.
+    /// </summary>
+    /// <param name="StartX">
+    ///  The rightmost corner of the rect to export.
+    ///  X-coorninates increase from right to left like so: high- 9..0 -low
+    /// </param>
+    /// <param name="StartY">
+    ///  The topmost corner of the rect to export.
+    ///  Y-coorninates increase from top to bottom like so: top- 0..9 -bottom
+    /// </param>
+    /// <param name="Spillage">
+    ///  A TRect denoting the points where the fragments put into the TGridBitmap
+    ///  spilled over the 16x16 bounds.
+    ///  Any result other than Rect(0,0,0,0) means that additional GridBitmaps
+    ///  need to be constructed.
+    ///  Spillage is usually to the left and bottom, so a typical overflow looks like
+    ///  Rect(2,0,0,2), which means you need to add Bitmaps to the left and bottom
+    ///  and probably an additional one to the bottom-left as well.
+    /// </param>
+    /// <returns>
+    ///  The bitmap consisting two parts: a known and unknown part
+    ///  The known part contains ON pixels for every known ON pixel
+    ///  in the input, and OFF pixels for all unknown pixels as well as unknown pixels
+    ///  The unknown mask contains ON pixels for all the unknown parts, this
+    ///  can be used to mask off the parts of the map.
+    ///  The format can be inputted into the AVX Life generation code.
+    ///  Care must be taken to interpret the output thereof, because of the
+    ///  stagger stepping that takes place.
+    ///  This is less of a problem then it seems though, because the future light cone
+    ///  of the pattern 16x16 pixels at t=0 is 14x14 pixels at t=1.
+    /// </returns>
+    function AsBitmap(StartX, StartY: integer; out Spillage: TRect): TGridBitmap;
     property SizeX: integer read FSizeX;
     property SizeY: integer read FSizeY;
     /// <summary>
     ///  Get the slice at the given coordinate.
-    ///  Will generate an exception if the coordinate is out of bounds.
+    ///  !!Will generate an exception if the coordinate is out of bounds!!.
     /// </summary>
     property Item[const Coordinate: TPoint]: TSlice read GetSlice write SetSlice; default;
     property Item[x,y: integer]: TSlice read GetSlice write SetSlice; default;
     property Item[i: integer]: TSlice read GetSlice write SetSlice; default;
   end;
 
-  //A cake is a 5x5 part of the future grid.
-  //It is stored in two parts, 1 part with known pixels
-  //and 1 part with unknown pixels.
+  /// <summary>
+  ///A cake is a 5x5 part of the future grid.
+  ///It is stored in two parts, 1 part with known pixels
+  ///and 1 part with unknown pixels.
+  ///A slice is a part of a cake, and the cake is the whole :-)
+  ///This is only used as input for the lookup table.
+  /// </summary>
   TCake = record
   private
+    //2 x 25 bits of storage.
     FKnownPart, FUnknownPart: integer;
   public
     constructor Create(Known, Unknown: integer);
+    /// <summary>
+    ///  True if there are no unknown pixels.
+    /// </summary>
     function IsKnown: boolean;
-    function ToSlice: TSlice;
+    /// <summary>
+    ///  Shift bits in and out of view
+    ///  Used to combine two cakes
+    /// </summary>
     class operator RightShift(const A: TCake; B: cardinal): TCake;
     class operator LeftShift(const A: TCake; B: cardinal): TCake;
+    /// <summary>
+    ///  Super simple trick to set pixels
+    /// </summary>
     procedure SetKnown;
     procedure SetUnknown;
+    /// <summary>
+    ///  Is the LSB set?
+    /// </summary>
     function OddKnown: boolean;
     function OddUnknown: boolean;
     property Known: integer read FKnownPart;
     property Unknown: integer read FUnknownPart;
   end;
 
-
+  /// <summary>
+  ///  Convert a point(x,y) to a single index number.
+  /// </summary>
   TPointHelper = record helper for TPoint
     function Index(YSize: integer): integer;
+    /// <summary>
+    ///  Get the index number of a West slice of a EW pair
+    /// </summary>
     function West(YSize: integer): integer;
+    /// <summary>
+    ///  Get the index number of the East slice of a EW pair
+    /// </summary>
     function East(YSize: integer): integer;
+    /// <summary>
+    ///  Get the index number of the North slice of a NS pair
+    /// </summary>
     function North(YSize: integer): integer;
+    /// <summary>
+    ///  Get the index number of the South slice of a NS pair
+    /// </summary>
     function South(YSize: integer): integer;
   end;
 
 
 type
+  /// <summary>
+  ///  Our everything and the kitchen sink form.
+  ///  This will need to be cleaned up for the final version.
+  ///  For now it is just a canvas to run experiments and do validations.
+  /// </summary>
   TForm2 = class(TForm)
     PageControl1: TPageControl;
     TabSheet1: TTabSheet;
@@ -418,7 +976,7 @@ type
     Label3: TLabel;
     LabelSolutions: TLabel;
     Label5: TLabel;
-    Button1: TButton;
+    BtnProcessSliceLookup: TButton;
     Memo1: TMemo;
     BtnProcess_7x7_CountLookup: TButton;
     StringGrid1: TStringGrid;
@@ -472,9 +1030,10 @@ type
     Taskbar1: TTaskbar;
     ActionManager1: TActionManager;
     Action_SliverSolveRound: TAction;
-    Button2: TButton;
+    BtnRunSingleTest: TButton;
     ProgressBar1: TProgressBar;
     BtnCreateLookup5x5to3x3UsingSpeculativeExploration: TButton;
+    BtnInitWithGoE2: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     procedure BtnCreateLookupUsingSolverClick(Sender: TObject);
     procedure BtnRotateCounterClick(Sender: TObject);
@@ -491,7 +1050,7 @@ type
     procedure BtnValidateCountTableClick(Sender: TObject);
     procedure BtnApplyNELookupTablesClick(Sender: TObject);
     procedure BtnApplyCornerLookupTablesClick(Sender: TObject);
-    procedure Button1Click(Sender: TObject);
+    procedure BtnProcessSliceLookupClick(Sender: TObject);
     procedure BtnProcess_7x7_CountLookupClick(Sender: TObject);
     procedure StringGrid1DblClick(Sender: TObject);
     procedure BtnAppyLookupTableClick(Sender: TObject);
@@ -513,6 +1072,8 @@ type
     procedure StringGrid3Click(Sender: TObject);
     procedure StringGrid4DrawCell(Sender: TObject; ACol, ARow: integer; Rect: TRect; State: TGridDrawState);
     procedure StringGrid5DblClick(Sender: TObject);
+    procedure BtnInitWithGoE2Click(Sender: TObject);
+    procedure BtnRunSingleTestClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -527,9 +1088,12 @@ type
     class procedure LeadingTrailingPopCount(UnknownMask: integer; out Leading,
       Trailing, Popcnt: integer); static;
     function UnknownSlice(Cake: TCake): TSlice;
-    class function GetNextBitSet(previous, i: integer): integer; static;
+    class function GetNextBitSet(previous: integer; i: Uint64): integer; static;
+    {$HINTS OFF}
     procedure InitWithGoE2;
+    {$HINTS ON}
     procedure CreateLookupUsingGridSolver(ThreadIndex, ThreadCount: integer; var data: TArray<TSlice>);
+    procedure InitWithPattern(const Pattern: string);
   public
     LookupTable: TLookupTable;
     function FoldRemaining(Offset: TOffset; UnknownMask, KnownMask: integer; Filter: boolean = false): TSlice;
@@ -557,6 +1121,10 @@ function Random64: Uint64;
 function GetCurrentProcessorNumber: DWORD; stdcall;
 procedure Move(const source; var Dest; Size: NativeInt);
 
+   {$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\AVXGenerate.o'}
+
+function AVXGENERATE_TSLIVERHELPER_NS(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external name 'AVXGENERATE_$$_TSLIVERHELPER_NS';
+function AVXGENERATE_TSLIVERHELPER_EW(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external name 'AVXGENERATE_$$_TSLIVERHELPER_EW';
 
 implementation
 
@@ -570,6 +1138,7 @@ uses{$IFDEF GpProfile U} GpProf, {$ENDIF GpProfile U}
   System.UITypes,
   System.Diagnostics,
   HIResStopWatch,
+  Universe,
   TestInsight.Client, TestInsight.DUnitX, UnitTests, Math;
 
 {$R *.dfm}
@@ -637,6 +1206,47 @@ asm
   mov rsi,r10
   mov rdi,r9
 end;
+
+function RorX(Shift: integer; const input: Uint64): Uint64;
+asm
+  mov rax,rdx
+  ror ax,cl
+  ror rax,16
+  ror ax,cl
+  ror rax,16
+  ror ax,cl
+  ror rax,16
+  ror ax,cl
+  ror rax,16
+end;
+
+function RorY(Shift: integer; const input: Uint64): Uint64;
+asm
+  mov rax,rdx
+  shl ecx,4    //shift by 16 bits at a time
+  ror rax,cl
+end;
+
+function RolX(Shift: integer; const input: Uint64): Uint64;
+asm
+  mov rax,rdx
+  rol ax,cl
+  rol rax,16
+  rol ax,cl
+  rol rax,16
+  rol ax,cl
+  rol rax,16
+  rol ax,cl
+  rol rax,16
+end;
+
+function RolY(Shift: integer; const input: Uint64): Uint64;
+asm
+  mov rax,rdx
+  shl ecx,4    //shift by 16 bits at a time
+  rol rax,cl
+end;
+
 
 type
   TGetCurrentProcessorNumber = function: dword;
@@ -736,7 +1346,7 @@ end;
 
 type
   TFileStream = class(System.Classes.TFileStream)
-    function Read64(Buffer: TBytes; Offset, Count: int64): int64;
+    function Read64(Buffer: TBytes; Offset, Count: int64): int64; reintroduce;
   end;
 
 function TFileStream.Read64(Buffer: TBytes; Offset, Count: int64): int64;
@@ -766,7 +1376,7 @@ begin
   end;
 end;
 
-procedure TForm2.Button1Click(Sender: TObject);
+procedure TForm2.BtnProcessSliceLookupClick(Sender: TObject);
 var
   FS: TFileStream;
   i, j: integer;
@@ -833,7 +1443,7 @@ begin
     Label1.Caption:= '0: average passes: ' + Total0.ToString + ' holes: ' + (512 - Total0).ToString +
       ' 1: average passes: ' + Total1.ToString + ' holes: ' + (512 - Total1).ToString;
     TArray.Sort<TSlice>(Buffer, TSliceComparer.Comparer);
-    Button1.Caption:= 'Sort done';
+    BtnProcessSliceLookup.Caption:= 'Sort done';
     UniqueCount:= 1;
     for i:= 0 to high(Buffer) - 1 do begin
       if Buffer[i] = Buffer[i + 1] then continue;
@@ -859,14 +1469,28 @@ begin
   end;
 end;
 
-function TSlice.GetBit(Index: integer): boolean;
-var
-  Mask: uint64;
-  element: integer;
+procedure TForm2.BtnRunSingleTestClick(Sender: TObject);
 begin
-  Mask:= (1 shl (index and 63));
-  element:= index div 64;
-  Result:= (Data8[element] and Mask) <> 0;
+  //Put a failing test and breakpoint here if you need to debug it.
+end;
+
+procedure TForm2.BtnInitWithGoE2Click(Sender: TObject);
+begin
+  InitWithGoE2;
+end;
+
+//we must accept negative numbers, because these are used in the UI for pretty colors.
+function TSlice.GetBit(Index: integer): boolean;
+asm
+//ABS(index)
+  mov eax,edx
+  cdq
+  xor eax, edx
+  sub eax, edx
+//ABS done, get the bit.
+  bt [rcx],eax
+  mov eax,0    //make sure a cast from int to boolean does not add random cruft.
+  setc al
 end;
 
 class function TSlice.GetReordering(Order: TArray<integer>; const Input: TArray<integer>): TArray<integer>;
@@ -924,7 +1548,6 @@ begin
     'index= ' + MaxIndex.ToString + ' ' + 'Avg= ' + Avg.ToString;
 end;
 
-{ TODO -oJB -cRefactor : If we allow '?' then we can have more than one future cakes }
 function GetFutureCake(const SG: TStringGrid; col, row: integer): TCake;
 var
   x, y: integer;
@@ -1373,7 +1996,7 @@ begin
       // Now solve for every allowed state in the center slice
       OldGrid:= Grid;
       for a:= 0 to 511 do begin
-        if (Grid[Middle, Middle].IsBitSet(a)) then begin
+        if (Grid[Middle, Middle].GetBit(a)) then begin
           // Reset the grid back to the start
           Grid:= OldGrid;
           // Force the grid to the state.
@@ -2106,6 +2729,7 @@ begin
   AppRegistry.WriteString(cUnknownSliceData,Filename);
 end;
 
+
 function DeleteBitAlternative(input, BitTodelete: integer): integer;
 var
   i: integer;
@@ -2381,16 +3005,16 @@ asm
   mov [r9],eax
 end;
 
-class function TForm2.GetNextBitSet(previous, i: integer): integer;
+class function TForm2.GetNextBitSet(previous: integer; i: Uint64): integer;
 asm
   //ecx = previous
-  //edx = i
+  //rdx = i
   inc ecx          //make sure we get the NEXT bit.
-  shr edx,cl      //remove the previous bits
+  shr rdx,cl      //remove the previous bits
   //rep bsf eax,edx //tzcnt eax,edx //Count the number of LSB that are zero
-  mov eax,32
-  bsf eax,edx     //BSF eax,ecx If the ecx= 0, BSF sets ZF to 1 and does not change eax.
-  add eax,ecx     //add the previous count back in.
+  mov eax,64
+  bsf rax,rdx     //BSF eax,ecx If the ecx= 0, BSF sets ZF to 1 and does not change eax.
+  add rax,rcx     //add the previous count back in.
 end;
 
 {$Region 'old comments'}
@@ -2641,17 +3265,14 @@ var
   MinOn, MinOff: uint64;
   MinOnIndex, MinOffIndex: integer;
   Counts: TArray<uint64>;
-  item: uint64;
-  FS: TFileStream;
-  i: integer;
 begin
   if not(FileOpenDialog1.Execute) then Exit;
-  FS:= TFileStream.Create(FileOpenDialog1.Filename, fmOpenRead);
+  var FS:= TFileStream.Create(FileOpenDialog1.Filename, fmOpenRead);
   SetLength(Counts, FS.Size div SizeOf(uint64));
   FS.Read64(TBytes(Counts), 0, FS.Size);
   FS.Free;
   Ist:= 0;
-  for item in Counts do Inc(Ist, item);
+  for var item in Counts do Inc(Ist, item);
   Soll:= 1;
   Soll:= Soll shl 49;
   System.Assert(Ist = Soll);
@@ -2660,7 +3281,7 @@ begin
   // Find the minimum on and off slices
   MinOnIndex:= 0;
   MinOffIndex:= 0;
-  for i:= 0 to high(Counts) do begin
+  for var i:= 0 to high(Counts) do begin
     case ((i and (1 shl 12)) <> 0) of
       true: if (Counts[i] < MinOn) then begin
         MinOn:= Counts[i];
@@ -2671,7 +3292,7 @@ begin
         MinOffIndex:= i;
       end;
     end;
-  end;
+  end; {for i}
   Display5x5(TCake.Create(MinOnIndex,0), SGMinOn);
   Display5x5(TCake.Create(MinOffIndex,0), SGMinOff);
   BtnValidateCountTable.Caption:= 'MinOn=' + MinOn.ToString + ' MinOff=' + MinOff.ToString;
@@ -2722,11 +3343,10 @@ procedure TForm2.BtnApplyCornerLookupTablesClick(Sender: TObject);
 var
   x, y: integer;
   Slices: TGrid;
-  Filename: string;
 begin
   // Read the lookup tables
   if not(LookupTable.HasCornerData) then begin
-    Filename:= AppRegistry.ReadString(cCornerIndex);
+    var Filename:= AppRegistry.ReadString(cCornerIndex);
     if (Filename = '') then begin
       FileOpenDialog1.Title:= 'Read Corner index';
       if not(FileOpenDialog1.Execute) then Exit;
@@ -2793,11 +3413,6 @@ begin
 end;
 
 procedure TForm2.BtnAppyLookupTableClick(Sender: TObject);
-var
-  x, y: integer;
-  Slices: TGrid; // array[0..10,0..10] of TSlice;
-  // LookupTable: TArray<TSlice>;
-  // FS: TFileStream;
 begin
   // Read the lookup table
   // if not FileOpenDialog1.Execute then Exit;
@@ -2805,10 +3420,10 @@ begin
   // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
-  Slices:= TGrid.Create(16,16);
+  var Slices:= TGrid.Create(16,16);
   // Get the slice data from the grid, by looking it up in the lookup table
-  for x:= 0 to 15 do begin
-    for y:= 0 to 15 do begin
+  for var x:= 0 to 15 do begin
+    for var y:= 0 to 15 do begin
       Slices[x, y]:= FutureGridToPastSlice(StringGrid1, x, y, LookupTable, oCenter);
       StringGrid3.Cells[x, y]:= '';
     end;
@@ -3007,21 +3622,18 @@ begin
   end;
 end;
 
-procedure TForm2.InitWithGoE2;
-var
-  SG: TStringGrid;
-  x, y: integer;
-  i: integer;
-const
-  Pattern: string = '-X-XXX-X--,' + '--X-X-X--X,' + 'X-XXX--XX-,' + '-X-XXXXX-X,' + 'X--X--XXXX,' + 'XXXX--X--X,' +
-    'X-XXXXX-X-,' + '-XX--XXX-X,' + 'X--X-X-X--,' + '--X-XXX-X-.';
+procedure TForm2.InitWithPattern(const Pattern: string);
 begin
-  SG:= StringGrid1;
-  x:= 5;
-  y:= 5;
-  i:= 1;
+  var SG:= StringGrid1;
+  for var x:= 0 to SG.ColCount-1 do for var y:= 0 to SG.RowCount-1 do begin
+    SG.Cells[x,y]:= '?';
+  end;
+  var x:= 5;
+  var y:= 5;
+  var i:= 1;
   while Pattern[i] <> '.' do begin
-    if Pattern[i] = 'X' then SG.Cells[x, y]:= 'X';
+    if Pattern[i] = 'X' then SG.Cells[x, y]:= 'X'
+    else if (Pattern[i] = '-') then SG.Cells[x,y]:= ' ';
     if Pattern[i] = ',' then begin
       x:= 5;
       Inc(y);
@@ -3031,11 +3643,23 @@ begin
   end;
 end;
 
+procedure TForm2.InitWithGoE2;
+const
+  Pattern: string = '-X-XXX-X--,'
+                  + '--X-X-X--X,'
+                  + 'X-XXX--XX-,'
+                  + '-X-XXXXX-X,'
+                  + 'X--X--XXXX,'
+                  + 'XXXX--X--X,'
+                  + 'X-XXXXX-X-,'
+                  + '-XX--XXX-X,'
+                  + 'X--X-X-X--,'
+                  + '--X-XXX-X-.';
+begin
+  InitWithPattern(Pattern);
+end;
+
 procedure TForm2.InitWithGoE;
-var
-  SG: TStringGrid;
-  x, y: integer;
-  i: integer;
 const
   Pattern: string = '?-X---X-??,' +
                     '?X-X-X-XX-,' +
@@ -3048,23 +3672,7 @@ const
                     '-XX-X-X-X?,' +
                     '??-X---X-?.';
 begin
-  SG:= StringGrid1;
-  for x:= 0 to SG.ColCount-1 do for y:= 0 to SG.RowCount-1 do begin
-    SG.Cells[x,y]:= '?';
-  end;
-  x:= 5;
-  y:= 5;
-  i:= 1;
-  while Pattern[i] <> '.' do begin
-    if Pattern[i] = 'X' then SG.Cells[x, y]:= 'X'
-    else if (Pattern[i] = '-') then SG.Cells[x,y]:= ' ';
-    if Pattern[i] = ',' then begin
-      x:= 5;
-      Inc(y);
-    end
-    else Inc(x);
-    Inc(i);
-  end;
+  InitWithPattern(Pattern);
 end;
 
 procedure TForm2.FormCreate(Sender: TObject);
@@ -3394,30 +4002,47 @@ begin
   TSlice.RandomSeed:= 546546;
 end;
 
-function TSlice.IsBitSet(Bit: integer): boolean;
-begin
-  System.Assert((Bit >= 0) and (Bit <= 511));
-  Result:= (Self.Data4[Bit shr 5] and (1 shl (31 and Bit)) <> 0);
-end;
+//function TSlice.IsBitSet(Bit: integer): boolean;
+////begin
+////  System.Assert((Bit >= 0) and (Bit <= 511));
+////  Result:= (Self.Data4[Bit shr 5] and (1 shl (31 and Bit)) <> 0);
+////end;
+//asm
+//  //RCX = @self
+//  //edx = bit index
+//  xor eax,eax
+//  bt [rcx],edx
+//  setc al
+//end;
 
 function TSlice.IsZero: boolean;
 asm
   //test to see if every bit in the slice is zero
   //RCX = self
-  pcmpeqq xmm0,xmm0   //FFFFFFF...
-  ptest xmm0,[rcx]
-  jnz @Done
-  ptest xmm0,[rcx+16]
-  jnz @Done
-  ptest xmm0,[rcx+32]
-  jnz @Done
-  ptest xmm0,[rcx+48]
+//  pcmpeqq xmm0,xmm0   //FFFFFFF...
+//  ptest xmm0,[rcx]
+//  jnz @Done
+//  ptest xmm0,[rcx+16]
+//  jnz @Done
+//  ptest xmm0,[rcx+32]
+//  jnz @Done
+//  ptest xmm0,[rcx+48]
+//@Done:
+//  setz al
+//  rep ret
+
+db  $c4,$e2,$79,$29,$c0           //vpcmpeqq xmm0,xmm0,xmm0
+db  $c4,$e2,$79,$17,$01           //vptest xmm0,[rcx]
+db  $75,$16                       //jne     <Done>
+db  $c4,$e2,$79,$17,$41,$10       //vptest xmm0,[rcx+$10]
+db  $75,$0e                       //jne     <Done>
+db  $c4,$e2,$79,$17,$41,$20       //vptest xmm0,[rcx+$20]
+db  $75,$06                       //jne     <Done>
+db  $c4,$e2,$79,$17,$41,$30        //vptest xmm0,[rcx+$30]
 @Done:
-  setnz al
-  rep ret
+db  $0f,$94,$c0                   //sete   al
+db  $f3,$c3                       //repz ret
 end;
-
-
 
 class operator TSlice.LessThan(const a, b: TSlice): boolean;
 var
@@ -3569,17 +4194,36 @@ begin
 end;
 
 procedure TSlice.SetBit(Index: integer; value: boolean = true);
-var
-  One: uint64;
-  Mask: uint64;
-  element: integer;
-begin
-  One:= 1;
-  index:= ABS(index);
-  Mask:= (One shl (index and 63));
-  element:= index div 64;
-  if (value = false) then Data8[element]:= Data8[element] and not Mask
-  else Data8[element]:= Data8[element] or Mask;
+//var
+//  One: uint64;
+//  Mask: uint64;
+//  element: integer;
+//begin
+//  One:= 1;
+//  index:= ABS(index);
+//  Mask:= (One shl (index and 63));
+//  element:= index div 64;
+//  if (value = false) then Data8[element]:= Data8[element] and not Mask
+//  else Data8[element]:= Data8[element] or Mask;
+//end;
+asm
+  //RCX = @self
+  //edx = index
+  //r8b = value
+//abs(x), see wikipedia
+  mov eax,edx
+  cdq
+  xor eax,edx
+  sub eax,edx
+//BitTest
+  test r8b,r8b
+  jz @clear
+@Set:
+  bts [rcx],eax
+  rep ret
+@clear:
+  btc [rcx],eax
+  rep ret
 end;
 
 procedure TSlice.ForceSingleBit(Index: integer);
@@ -3588,56 +4232,203 @@ begin
   Self.SetBit(index);
 end;
 
-class operator TSlice.BitwiseAnd(const a, b: TSlice): TSlice;
+function TSlice.GetBitmap(out KnownBitmap, UnknownBitmap: UInt64): TSliverChanges;
 var
+  OnBitmap: integer;
+  OffBitmap: integer;
   i: integer;
+  Index: integer;
 begin
-  for i:= 0 to 7 do begin
-    Result.Data8[i]:= a.Data8[i] and b.Data8[i];
-  end;
+  OnBitmap:= 0;
+  OffBitmap:= -1;
+  Index:= NextSetBit(-1);
+
+  //We follow a multi-pronged strategy.
+  //After a simple sanity check to see if the slice is valid
+  //We check the popcount to see how much work it is to enumerate all constellations.
+  //If its cheap we do that, and split the accumulation thereof into Known and unknown bitmaps
+
+  //If more than half of the positions are filled, then no single pixel can be known
+
+  //Else we do a check against a bitmask per pixel.
+  //There are 9 pixels, so 9 checks.
+  case Self.PopCount of
+    0: Exit(TSliverChanges.Invalid);
+    1..16: begin
+      while (Index < 512) do begin
+        OnBitmap:= OnBitmap or Index;       //OR only adds pixels
+        OffBitmap:= OffBitmap and Index;    //AND only subtracts pixels
+        if (OnBitmap xor OffBitmap) = 511 then break; //stop sampling if all pixels are unknown
+      end; {while}
+      KnownBitmap:= (OnBitmap and OffBitmap);
+      UnknownBitmap:= (OnBitmap xor OffBitmap);
+    end; {1..16:}
+    257..512: begin
+      UnknownBitmap:= 511;
+      KnownBitmap:= 0;
+    end
+    else begin
+      for i:= 0 to 8 do begin
+        if ((Self and BitMask[i]) = Self) then KnownBitmap:= KnownBitmap or (1 shl i)
+        else UnknownBitmap:= UnknownBitmap or (1 shl i);
+      end;
+    end;
+  end; {case}
+  KnownBitmap:= (KnownBitmap and 7) xor ((KnownBitmap and $38) shl 13) xor ((KnownBitmap and $1C0) shl (10+16));
+  UnknownBitmap:= (UnknownBitmap and 7) xor ((UnknownBitmap and $38) shl 13) xor ((UnknownBitmap and $1C0) shl (10+16))
 end;
+
+class operator TSlice.BitwiseAnd(const a, b: TSlice): TSlice;
+//var
+//  i: integer;
+//begin
+//  for i:= 0 to 7 do begin
+//    Result.Data8[i]:= a.Data8[i] and b.Data8[i];
+//  end;
+asm
+  //RCX = @Result
+  //RDX = @A
+  //R8 = @B
+//  movdqu xmm0,[rdx]
+//  movdqu xmm1,[r8]
+//  pand xmm0,xmm1
+//  movdqu [rcx],xmm0
+//  movdqu xmm2,[rdx+16]
+//  movdqu xmm3,[r8+16]
+//  pand xmm2,xmm3
+//  movdqu [rcx+16],xmm2
+//  movdqu xmm4,[rdx+32]
+//  movdqu xmm5,[r8+32]
+//  pand xmm4,xmm5
+//  movdqu [rcx+32],xmm4
+//  movdqu xmm6,[rdx+48]
+//  movdqu xmm7,[r8+48]
+//  pand xmm6,xmm7
+//  movdqu [rcx+48],xmm6
+db  $c5,$fa,$6f,$02              //vmovdqu xmm0,[rdx]
+db  $c4,$c1,$79,$db,$00          //vpand  xmm0,xmm0,[r8]
+db  $c5,$fa,$7f,$01              //vmovdqu [rcx],xmm0
+db  $c5,$fa,$6f,$4a,$10          //vmovdqu xmm1,[rdx+$10]
+db  $c4,$c1,$71,$db,$48,$10      //vpand  xmm1,xmm1,[r8+$10]
+db  $c5,$fa,$7f,$49,$10          //vmovdqu [rcx+$10],xmm1
+db  $c5,$fa,$6f,$52,$20          //vmovdqu xmm2,[rdx+$20]
+db  $c4,$c1,$69,$db,$50,$20      //vpand  xmm2,xmm2,[r8+$20]
+db  $c5,$fa,$7f,$51,$20          //vmovdqu [rcx+$20],xmm2
+db  $c5,$fa,$6f,$5a,$30          //vmovdqu xmm3,[rdx+$30]
+db  $c4,$c1,$61,$db,$58,$30      //vpand  xmm3,xmm3,[r8+$30]
+db  $c5,$fa,$7f,$59,$30          //vmovdqu [rcx+$30],xmm3
+end;
+
 
 class operator TSlice.LogicalNot(const a: TSlice): TSlice;
-var
-  i: integer;
-begin
-  for i:= 0 to high(a.Data8) do begin
-    Result.Data8[i]:= not(a.Data8[i]);
-  end;
+//var
+//  i: integer;
+//begin
+//  for i:= 0 to high(a.Data8) do begin
+//    Result.Data8[i]:= not(a.Data8[i]);
+//  end;
+asm
+  //RCX = @Result
+  //RDX = @A
+//  movdqu xmm0,[rdx]
+//  pcmpeqq xmm15,xmm15     //invert mask
+//  pxor xmm0,xmm15
+//  movdqu [rcx],xmm0
+//  movdqu xmm1,[rdx+16]
+//  pxor xmm1,xmm15
+//  movdqu [rcx+16],xmm1
+//  movdqu xmm2,[rdx+32]
+//  pxor xmm2,xmm15
+//  movdqu [rcx+32],xmm2
+//  movdqu xmm3,[rdx+48]
+//  pxor xmm3,xmm15
+//  movdqu [rcx+48],xmm3
+db  $c4,$42,$01,$29,$ff          //vpcmpeqq xmm15,xmm15,xmm15
+db  $c5,$81,$ef,$02              //vpxor  xmm0,xmm15,[rdx]
+db  $c5,$fa,$7f,$01              //vmovdqu [rcx],xmm0
+db  $c5,$81,$ef,$4a,$10          //vpxor  xmm1,xmm15,[rdx+$10]
+db  $c5,$fa,$7f,$49,$10          //vmovdqu [rcx+$10],xmm1
+db  $c5,$81,$ef,$52,$20          //vpxor  xmm2,xmm15,[rdx+$20]
+db  $c5,$fa,$7f,$51,$20          //vmovdqu [rcx+$20],xmm2
+db  $c5,$81,$ef,$5a,$30          //vpxor  xmm3,xmm15,[rdx+$30]
+db  $c5,$fa,$7f,$59,$30          //vmovdqu [rcx+$30],xmm3
 end;
 
+
 class operator TSlice.BitwiseOr(const a, b: TSlice): TSlice;
-var
-  i: integer;
-begin
-  for i:= 0 to 7 do begin
-    Result.Data8[i]:= a.Data8[i] or b.Data8[i];
-  end;
-//asm
-//  //rcx @Result
-//  //RDX @a
-//  //R8 @b
+//var
+//  i: integer;
+//begin
+//  for i:= 0 to 7 do begin
+//    Result.Data8[i]:= a.Data8[i] or b.Data8[i];
+//  end;
+asm
 //  movdqu xmm0,[rdx]
-//  movdqu xmm1,[rdx+16]
-//  movdqu xmm2,[rdx+32]
-//  movdqu xmm3,[rdx+48]
-//  por xmm0,[r8]
-//  por xmm1,[r8+16]
-//  por xmm2,[r8+32]
-//  por xmm3,[r8+48]
+//  movdqu xmm1,[r8]
+//  por xmm0,xmm1
 //  movdqu [rcx],xmm0
-//  movdqu [rcx+16],xmm1
-//  movdqu [rcx+32],xmm2
-//  movdqu [rcx+48],xmm3
+//  movdqu xmm2,[rdx+16]
+//  movdqu xmm3,[r8+16]
+//  por xmm2,xmm3
+//  movdqu [rcx+16],xmm2
+//  movdqu xmm4,[rdx+32]
+//  movdqu xmm5,[r8+32]
+//  por xmm4,xmm5
+//  movdqu [rcx+32],xmm4
+//  movdqu xmm6,[rdx+48]
+//  movdqu xmm7,[r8+48]
+//  por xmm6,xmm7
+//  movdqu [rcx+48],xmm6
+db  $c5,$fa,$6f,$02              //vmovdqu xmm0,[rdx]
+db  $c4,$c1,$79,$eb,$00          //vpor   xmm0,xmm0,[r8]
+db  $c5,$fa,$7f,$01              //vmovdqu [rcx],xmm0
+db  $c5,$fa,$6f,$4a,$10          //vmovdqu xmm1,[rdx+$10]
+db  $c4,$c1,$71,$eb,$48,$10      //vpor   xmm1,xmm1,[r8+$10]
+db  $c5,$fa,$7f,$49,$10          //vmovdqu [rcx+$10],xmm1
+db  $c5,$fa,$6f,$52,$20          //vmovdqu xmm2,[rdx+$20]
+db  $c4,$c1,$69,$eb,$50,$20      //vpor   xmm2,xmm2,[r8+$20]
+db  $c5,$fa,$7f,$51,$20          //vmovdqu [rcx+$20],xmm2
+db  $c5,$fa,$6f,$5a,$30          //vmovdqu xmm3,[rdx+$30]
+db  $c4,$c1,$61,$eb,$58,$30      //vpor   xmm3,xmm3,[r8+$30]
+db  $c5,$fa,$7f,$59,$30          //vmovdqu [rcx+$30],xmm3
 end;
 
 class operator TSlice.BitwiseXor(const a, b: TSlice): TSlice;
-var
-  i: integer;
-begin
-  for i:= 0 to 7 do begin
-    Result.Data8[i]:= a.Data8[i] xor b.Data8[i];
-  end;
+//var
+//  i: integer;
+//begin
+//  for i:= 0 to 7 do begin
+//    Result.Data8[i]:= a.Data8[i] xor b.Data8[i];
+//  end;
+asm
+//  movdqu xmm0,[rdx]
+//  movdqu xmm1,[r8]
+//  pxor xmm0,xmm1
+//  movdqu [rcx],xmm0
+//  movdqu xmm2,[rdx+16]
+//  movdqu xmm3,[r8+16]
+//  pxor xmm2,xmm3
+//  movdqu [rcx+16],xmm2
+//  movdqu xmm4,[rdx+32]
+//  movdqu xmm5,[r8+32]
+//  pxor xmm4,xmm5
+//  movdqu [rcx+32],xmm4
+//  movdqu xmm6,[rdx+48]
+//  movdqu xmm7,[r8+48]
+//  pxor xmm6,xmm7
+//  movdqu [rcx+48],xmm6
+db  $c5,$fa,$6f,$02              //vmovdqu xmm0,[rdx]
+db  $c4,$c1,$79,$ef,$00          //vpxor  xmm0,xmm0,[r8]
+db  $c5,$fa,$7f,$01              //vmovdqu [rcx],xmm0
+db  $c5,$fa,$6f,$4a,$10          //vmovdqu xmm1,[rdx+0x10]
+db  $c4,$c1,$71,$ef,$48,$10      //vpxor  xmm1,xmm1,[r8+0x10]
+db  $c5,$fa,$7f,$49,$10          //vmovdqu [rcx+0x10],xmm1
+db  $c5,$fa,$6f,$52,$20          //vmovdqu xmm2,[rdx+0x20]
+db  $c4,$c1,$69,$ef,$50,$20      //vpxor  xmm2,xmm2,[r8+0x20]
+db  $c5,$fa,$7f,$51,$20          //vmovdqu [rcx+0x20],xmm2
+db  $c5,$fa,$6f,$5a,$30          //vmovdqu xmm3,[rdx+0x30]
+db  $c4,$c1,$61,$ef,$58,$30      //vpxor  xmm3,xmm3,[r8+0x30]
+db  $c5,$fa,$7f,$59,$30          //vmovdqu [rcx+0x30],xmm3
 end;
 
 procedure TSlice.Clear;
@@ -3669,13 +4460,60 @@ end;
 
 
 class operator TSlice.Equal(const a, b: TSlice): boolean;
-var
-  i: integer;
-begin
-  for i:= 0 to high(a.Data8) do begin
-    if a.Data8[i] <> b.Data8[i] then Exit(false);
-  end;
-  Result:= true;
+//var
+//  i: integer;
+//begin
+//  for i:= 0 to high(a.Data8) do begin
+//    if a.Data8[i] <> b.Data8[i] then Exit(false);
+//  end;
+//  Result:= true;
+//end;
+asm
+  //RCX = @A
+  //RDX = @B
+  //al = result
+//  pcmpeqq xmm15,xmm15
+//  movdqu xmm0,[rcx]
+//  movdqu xmm1,[rdx]
+//  pxor xmm0,xmm1          //xmm0 = 0 if equal
+//  ptest xmm0,xmm15        //CF = diff(0,1) and $FFFFFFF
+//  jne @done
+//  movdqu xmm0,[rcx+16]
+//  movdqu xmm1,[rdx+16]
+//  pxor xmm0,xmm1
+//  ptest xmm0,xmm15
+//  jne @done
+//  movdqu xmm0,[rcx+32]
+//  movdqu xmm1,[rdx+32]
+//  pxor xmm0,xmm1
+//  ptest xmm0,xmm15
+//  jne @done
+//  movdqu xmm0,[rcx+48]
+//  movdqu xmm1,[rdx+48]
+//  pxor xmm0,xmm1
+//  ptest xmm0,xmm15
+//@done:
+//  sete al
+//  rep ret
+db  $c4,$42,$01,$29,$ff        //vpcmpeqq xmm15,xmm15,xmm15
+db  $c5,$fa,$6f,$01            //vmovdqu xmm0,[rcx]
+db  $c5,$f9,$ef,$02            //vpxor  xmm0,xmm0,[rdx]
+db  $c4,$c2,$79,$17,$c7        //vptest xmm0,xmm15
+db  $75,$31                    //jne    45 <done>
+db  $c5,$fa,$6f,$41,$10        //vmovdqu xmm0,[rcx+$10]
+db  $c5,$f9,$ef,$42,$10        //vpxor  xmm0,xmm0,[rdx+$10]
+db  $c4,$c2,$79,$17,$c7        //vptest xmm0,xmm15
+db  $75,$20                    //jne    45 <done>
+db  $c5,$fa,$6f,$41,$20        //vmovdqu xmm0,[rcx+$20]
+db  $c5,$f9,$ef,$42,$20        //vpxor  xmm0,xmm0,[rdx+$20]
+db  $c4,$c2,$79,$17,$c7        //vptest xmm0,xmm15
+db  $75,$0f                    //jne    45 <done>
+db  $c5,$fa,$6f,$41,$30        //vmovdqu xmm0,[rcx+$30]
+db  $c5,$f9,$ef,$42,$30        //vpxor  xmm0,xmm0,[rdx+$30]
+db  $c4,$c2,$79,$17,$c7        //vptest xmm0,xmm15
+@Done:
+db  $0f,$94,$c0                //sete   al
+db  $f3,$c3                    //repz ret
 end;
 
 { TSliceComparer<TSlice> }
@@ -3973,74 +4811,74 @@ class function TSliverHelper.NS(const North, South: TSlice; out Changed: TSliver
   //RDX =South: PSlice
   //R8 = Changed: PSliverChanges ((scUnchanged=0, scChanged=1, scInvalid=3));
   //RAX = Result: TSliver (as Int64)
-asm
-//  // First take the north slice and remove pixels 0,1,2
-//  for i:= 0 to 7 do begin
-//    // Remove pixel 012 by collapsing every byte into a bit.
-//    N.bytes[i]:= Remove012(North.Data8[i]);
-//  end;
-        pxor xmm0,xmm0        //xmm0 = 0
-@CollapsePart1:
-        movdqu xmm1,[rcx]
-        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
-        pmovmskb r11d,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
-@CollapsePart2:
-        movdqu xmm1,[rcx+16]
-        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
-        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
-        shl eax,16
-        or r11,rax            //save part2
-@CollapsePart3:
-        movdqu xmm1,[rcx+32]
-        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
-        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
-        shl rax,32
-        or r11,rax
-@CollapsePart4:
-        movdqu xmm1,[rcx+48]
-        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
-        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
-        shl rax,48
-        or r11,rax
-@FinalizeCollapseBytesIntoBits:
-        not r11               //Invert, so that byte=0 -> bit=0, byte<>0-> bit=1
-//  // Next remove pixels 678 from South
-//  // Do this by folding 8 slivers
-//  S:= South.Sliver[0];
-//  for i:= 1 to 7 do begin
-//    S:= S or South.Sliver[i];
-//  end;
-@FoldS:
-        mov rax,[rdx]     //Load slice South into registers
-        mov rcx,[rdx+8]
-        mov r9,[rdx+16]
-        mov r10,[rdx+24]
-        or rax,rcx
-        or r9,r10
-        or rax,r9
-        mov rcx,[rdx+32]     //Load slice South into registers
-        mov r9,[rdx+40]
-        mov r10,[rdx+48]
-        mov rdx,[rdx+56]
-        or rcx,r9
-        or r10,rdx
-        or rcx,r10
-        or rax,rcx
-        mov rcx,rax         //keep a copy for the status update
-//  Result:= N and S;
-        xor edx,edx           //assume stats = scUnchanged
-        and rax,r11           //And the two slivers
-@StatusUpdates:
-//  Changed:= Changed and Result; // or 2 if invalid
-//r8 = @Changed
-        setz dl               //If the result = 0 (invalid, then mark it as such).
-        shl edx,1
-//  Changed:= Changed or (N <> S); // or 1 if changes
-        xor rcx,r11           //Are the two slivers different?
-        setne cl              //yes, so there will be a change
-        or dl,cl              //merge the two change flags
-        mov [r8],dl           //save the status
+begin
+  Result:= AVXGENERATE_TSLIVERHELPER_NS(North, South, Changed);
 end;
+//asm
+//  JMP AVXGENERATE_TSLIVERHELPER_NS
+//end;
+////  // First take the north slice and remove pixels 0,1,2
+////  for i:= 0 to 7 do begin
+////    // Remove pixel 012 by collapsing every byte into a bit.
+////    N.bytes[i]:= Remove012(North.Data8[i]);
+////  end;
+//        pxor xmm0,xmm0        //xmm0 = 0
+//@CollapsePart1:
+//        movdqu xmm1,[rcx]
+//        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
+//        pmovmskb r11d,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
+//@CollapsePart2:
+//        movdqu xmm1,[rcx+16]
+//        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
+//        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
+//        shl eax,16
+//        or r11,rax            //save part2
+//@CollapsePart3:
+//        movdqu xmm1,[rcx+32]
+//        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
+//        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
+//        shl rax,32
+//        or r11,rax
+//@CollapsePart4:
+//        movdqu xmm1,[rcx+48]
+//        pcmpeqb xmm1,xmm0     //xmm1 = $FF if 0, $00 if not zero, per byte
+//        pmovmskb eax,xmm1     //ax = 1 bit per byte, 1 if 0, 0 if 1.
+//        shl rax,48
+//        or r11,rax
+//@FinalizeCollapseBytesIntoBits:
+//        not r11               //Invert, so that byte=0 -> bit=0, byte<>0-> bit=1
+////  // Next remove pixels 678 from South
+////  // Do this by folding 8 slivers
+////  S:= South.Sliver[0];
+////  for i:= 1 to 7 do begin
+////    S:= S or South.Sliver[i];
+////  end;
+//@FoldS:
+//        movdqu xmm0,[rdx]
+//        movdqu xmm1,[rdx+16]
+//        movdqu xmm2,[rdx+32]
+//        movdqu xmm3,[rdx+48]
+//        por xmm0,xmm1
+//        por xmm2,xmm3
+//        por xmm0,xmm2
+//        movhlps xmm1,xmm0
+//        por xmm0,xmm1
+//        movq rax,xmm0
+//        mov rcx,rax         //keep a copy for the status update
+////  Result:= N and S;
+//        xor edx,edx           //assume stats = scUnchanged
+//        and rax,r11           //And the two slivers
+//@StatusUpdates:
+////  Changed:= Changed and Result; // or 2 if invalid
+////r8 = @Changed
+//        setz dl               //If the result = 0 (invalid, then mark it as such).
+//        shl edx,1
+////  Changed:= Changed or (N <> S); // or 1 if changes
+//        xor rcx,r11           //Are the two slivers different?
+//        setne cl              //yes, so there will be a change
+//        or dl,cl              //merge the two change flags
+//        mov [r8],dl           //save the status
+//end;
 
 class function TSliverHelper.NWSE(const NorthWest, SouthEast: TSlice; var Changed: TSliverChanges): TSliver;
 var
@@ -4136,6 +4974,9 @@ end;
 
 
 class function TSliverHelper.EW(const East, West: TSlice; out Changed: TSliverChanges): TSliver;
+//asm
+//  jmp AVXGENERATE_TSLIVERHELPER_EW
+//end;
 const
   Mask: array[0..15] of byte = ($F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0);
   CollectBytes: array[0..15] of byte =  (0,2,4,6,8,10,12,14,0,2,4,6,8,10,12,14);
@@ -4155,18 +4996,18 @@ asm
 //    Temp1.Data4[i]:= West.Data4[i * 2] or West.Data4[i * 2 + 1];
 //  end;
 //Removing pixel 5 means folding every int32.
-//        movdqu xmm0,[rdx]        //0123
-//        movdqu xmm1,[rdx+16]     //4567
-//        movdqu xmm2,[rdx+32]     //89AB
-//        movdqu xmm3,[rdx+48]     //CDEF
+        movdqu xmm0,[rdx]        //0123
+        movdqu xmm1,[rdx+16]     //4567
+        movdqu xmm2,[rdx+32]     //89AB
+        movdqu xmm3,[rdx+48]     //CDEF
 //Now we need to fold 0 or 1 into 0, 2 to 3 into 2
 //So we need to change the order to A: 0246, B: 1357, C: 8ACE, D: 9BDF
 //We need to do some shuffling.
 //Lets get the first halves
-        pshufd xmm0,[rdx],(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //0213  02--
-        pshufd xmm1,[rdx+16],(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //4657  --57
-        pshufd xmm2,[rdx+32],(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //8A9B  8A--
-        pshufd xmm3,[rdx+48],(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //CEDF  --DF
+        pshufd xmm0,xmm0,(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //0213  02--
+        pshufd xmm1,xmm1,(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //4657  --57
+        pshufd xmm2,xmm2,(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //8A9B  8A--
+        pshufd xmm3,xmm3,(0 shl 0)+(2 shl 2)+(1 shl 4)+(3 shl 6);   //CEDF  --DF
         movdqu xmm15,[rip + mask]
         movdqa xmm14,xmm15
         psrlw xmm14,4
@@ -4224,6 +5065,7 @@ asm
 //  w:= Temp2.Sliver[0] or Temp2.Sliver[1];
         por xmm0,xmm1
         movq rdx,xmm0
+
         //push rdx            //make sure we keep sane
 //Now process the East part (contained in RCX)
 //  // Next create E by dropping pixels 0,3,6
@@ -4285,6 +5127,7 @@ asm
         psllw xmm10,4         //shift, so that it is in range
         por xmm0,xmm10        //combine the two: aabbccdd|eeffiijj
         movq rax,xmm0
+
         mov r11,rdx           //Get back West
         mov rcx,rax           //save east for status updates
 //  Result:= W and E;
@@ -4417,44 +5260,78 @@ begin
 end;
 
 function TSliverHelper.North: TSlice;
-const
-  SliverToSliceMask: array[0..7] of byte = ($01,$02,$04,$08,$10,$20,$40,$80);
+//const
+//  SliverToSliceMask: array[0..7] of byte = ($01,$02,$04,$08,$10,$20,$40,$80);
 asm
-  movq xmm0,[rcx]                       //Get the sliver
-  mov r9,$8040201008040201
-  movq xmm15,r9 //[rip+SliverToSliceMask] //Get the mask
-  movlhps xmm15,xmm15                   //extend it
-  mov r8,$0101010101010101              //Shuffle mask
-  movq xmm14,r8                         //00 00 00 00 00 00 00 00 01 01 01 01 01 01 01 01
-  pslldq xmm14,8                        //01 01 01 01 01 01 01 01 00 00 00 00 00 00 00 00
-  movdqa xmm1,xmm0                      //make a copy of the sliver
-  //bytes 0,1
-  pshufb xmm1,xmm14                     //copy the first two bytes across
-  pand xmm1,xmm15                       //Mask off the relevant bits
-  pcmpeqb xmm1,xmm15                    //Expand a bit into a byte
-  movdqu [rdx],xmm1
-  //bytes 2,3
-  psrldq xmm0,2                         //shift in the next two bytes
-  movdqa xmm2,xmm0
-  pshufb xmm2,xmm14                     //copy the next two bytes across
-  pand xmm2,xmm15                       //Mask off the relevant bits
-  pcmpeqb xmm2,xmm15                    //Expand a bit into a byte
-  movdqu [rdx+16],xmm2
-  //bytes 4,5
-  psrldq xmm0,2                         //shift in the next two bytes
-  movdqa xmm3,xmm0
-  pshufb xmm3,xmm14                     //copy the next two bytes across
-  pand xmm3,xmm15                       //Mask off the relevant bits
-  pcmpeqb xmm3,xmm15                    //Expand a bit into a byte
-  movdqu [rdx+32],xmm3
-  //bytes 6,7
-  psrldq xmm0,2                         //shift in the next two bytes
-  movdqa xmm4,xmm0
-  pshufb xmm4,xmm14                     //copy the final two bytes across
-  pand xmm4,xmm15                       //Mask off the relevant bits
-  pcmpeqb xmm4,xmm15                    //Expand a bit into a byte
-  //Store the data
-  movdqu [rdx+48],xmm4
+  //RCX = @Self    (a pointer to an Int64)
+  //RDX = @Result  (a pointer to an array[0..63] of byte)
+//  movq xmm0,[rcx]                       //Get the sliver
+//  mov r9,$8040201008040201
+//  movq xmm15,r9 //[rip+SliverToSliceMask] //Get the mask
+//  movlhps xmm15,xmm15                   //extend it
+//  mov r8,$0101010101010101              //Shuffle mask
+//  movq xmm14,r8                         //00 00 00 00 00 00 00 00 01 01 01 01 01 01 01 01
+//  pslldq xmm14,8                        //01 01 01 01 01 01 01 01 00 00 00 00 00 00 00 00
+//  movdqa xmm1,xmm0                      //make a copy of the sliver
+//  //bytes 0,1
+//  pshufb xmm1,xmm14                     //copy the first two bytes across
+//  pand xmm1,xmm15                       //Mask off the relevant bits
+//  pcmpeqb xmm1,xmm15                    //Expand a bit into a byte
+//  movdqu [rdx],xmm1
+//  //bytes 2,3
+//  psrldq xmm0,2                         //shift in the next two bytes
+//  movdqa xmm2,xmm0
+//  pshufb xmm2,xmm14                     //copy the next two bytes across
+//  pand xmm2,xmm15                       //Mask off the relevant bits
+//  pcmpeqb xmm2,xmm15                    //Expand a bit into a byte
+//  movdqu [rdx+16],xmm2
+//  //bytes 4,5
+//  psrldq xmm0,2                         //shift in the next two bytes
+//  movdqa xmm3,xmm0
+//  pshufb xmm3,xmm14                     //copy the next two bytes across
+//  pand xmm3,xmm15                       //Mask off the relevant bits
+//  pcmpeqb xmm3,xmm15                    //Expand a bit into a byte
+//  movdqu [rdx+32],xmm3
+//  //bytes 6,7
+//  psrldq xmm0,2                         //shift in the next two bytes
+//  movdqa xmm4,xmm0
+//  pshufb xmm4,xmm14                     //copy the final two bytes across
+//  pand xmm4,xmm15                       //Mask off the relevant bits
+//  pcmpeqb xmm4,xmm15                    //Expand a bit into a byte
+//  //Store the data
+//  movdqu [rdx+48],xmm4
+db  $c5,$fa,$7e,$01              //vmovq  xmm0,QWORD PTR [rcx]
+db  $49,$b9,$01,$02,$04,$08,$10,$20,$40,$80  //movabs r9,0x8040201008040201
+
+db  $c4,$41,$f9,$6e,$f9          //vmovq  xmm15,r9
+db  $c4,$41,$00,$16,$ff          //vmovlhps xmm15,xmm15,xmm15
+db  $49,$b8,$01,$01,$01,$01,$01,$01,$01,$01  //movabs r8,0x101010101010101
+
+db  $c4,$41,$f9,$6e,$f0          //vmovq  xmm14,r8
+db  $c4,$c1,$09,$73,$fe,$08      //vpslldq xmm14,xmm14,0x8
+db  $c5,$f9,$6f,$c8              //vmovdqa xmm1,xmm0
+db  $c4,$c2,$71,$00,$ce          //vpshufb xmm1,xmm1,xmm14
+db  $c4,$c1,$71,$db,$cf          //vpand  xmm1,xmm1,xmm15
+db  $c4,$c1,$71,$74,$cf          //vpcmpeqb xmm1,xmm1,xmm15
+db  $c5,$fa,$7f,$0a              //vmovdqu XMMWORD PTR [rdx],xmm1
+db  $c5,$f9,$73,$d8,$02          //vpsrldq xmm0,xmm0,0x2
+db  $c5,$f9,$6f,$d0              //vmovdqa xmm2,xmm0
+db  $c4,$c2,$69,$00,$d6          //vpshufb xmm2,xmm2,xmm14
+db  $c4,$c1,$69,$db,$d7          //vpand  xmm2,xmm2,xmm15
+db  $c4,$c1,$69,$74,$d7          //vpcmpeqb xmm2,xmm2,xmm15
+db  $c5,$fa,$7f,$52,$10          //vmovdqu XMMWORD PTR [rdx+0x10],xmm2
+db  $c5,$f9,$73,$d8,$02          //vpsrldq xmm0,xmm0,0x2
+db  $c5,$f9,$6f,$d8              //vmovdqa xmm3,xmm0
+db  $c4,$c2,$61,$00,$de          //vpshufb xmm3,xmm3,xmm14
+db  $c4,$c1,$61,$db,$df          //vpand  xmm3,xmm3,xmm15
+db  $c4,$c1,$61,$74,$df          //vpcmpeqb xmm3,xmm3,xmm15
+db  $c5,$fa,$7f,$5a,$20          //vmovdqu XMMWORD PTR [rdx+0x20],xmm3
+db  $c5,$f9,$73,$d8,$02          //vpsrldq xmm0,xmm0,0x2
+db  $c5,$f9,$6f,$e0              //vmovdqa xmm4,xmm0
+db  $c4,$c2,$59,$00,$e6          //vpshufb xmm4,xmm4,xmm14
+db  $c4,$c1,$59,$db,$e7          //vpand  xmm4,xmm4,xmm15
+db  $c4,$c1,$59,$74,$e7          //vpcmpeqb xmm4,xmm4,xmm15
+db  $c5,$fa,$7f,$62,$30          //vmovdqu XMMWORD PTR [rdx+0x30],xmm4
 end;
 
 
@@ -4590,6 +5467,8 @@ end;
 
 function TSliverHelper.South: TSlice;
 asm
+  // Add pixels 678
+  // This means copying the pattern 8 times
   //RCX = @self
   //RDX = @Result
   movq xmm0,[rcx]
@@ -4645,12 +5524,6 @@ begin
     Result.Data8[i]:= Temp1.Data8[0];
   end;
 end;
-
-
-
-{ TCake }
-
-
 
 { TLookupTable }
 
@@ -4855,7 +5728,7 @@ begin
   end;
 end;
 
-{ TSliverMood }
+{ TSliverChanges }
 
 class operator TSliverChanges.Add(const a, b: TSliverChanges): TSliverChanges;
 begin
@@ -4872,8 +5745,6 @@ begin
   Result:= a;
   if (b.Data8 = 0) then Result.AsByte:= Result.AsByte or byte(Ord(scInvalid));
 end;
-
-
 
 class function TSliverChanges.Changed: TSliverChanges;
 begin
@@ -4925,11 +5796,6 @@ begin
   Result.AsByte:= a.AsByte or byte(b <> false);
 end;
 
-//function TSliverChanges.StopSolving: boolean;
-//begin
-//  Result:= (Self.AsByte = 0) or (Self.IsInvalid);
-//end;
-
 class function TSliverChanges.UnChanged: TSliverChanges;
 begin
   Result.AsByte:= 0;
@@ -4940,8 +5806,7 @@ begin
   Result:= (a.AsByte <> b.AsByte);
 end;
 
-{ TDeleteBits }
-
+{ TMaskedBits }
 
 class operator TMaskedBits.Add(const A, B: TMaskedBits): TMaskedBits;
 var
@@ -4968,11 +5833,6 @@ begin
     end; {while}
     Result.Length:= j+1;
   end;
-end;
-
-function TMaskedBits.Count: integer;
-begin
-  Result:= FLength;
 end;
 
 constructor TMaskedBits.Create(UnknownBits: integer);
@@ -5118,96 +5978,46 @@ begin
   Inc(FUnknownPart);
 end;
 
-function TCake.ToSlice: TSlice;
-begin
 
-end;
 
-//{ TSliceStatus }
-//
-//function TSliceStatus.Changed: boolean;
-//begin
-//  Result:= FDelta <> 0;
-//end;
-//
-//function TSliceStatus.KeepGoing: boolean;
-//begin
-//  Result:= (FDelta <> 0) and (FPopCount <> 0);
-//end;
-//
-//constructor TSliceStatus.Create(x, y, PopCount: integer; Delta: integer = 0);
-//begin
-//  Self.FCoordinate:= point(x,y);
-//  Self.FPopCount:= Popcount;
-//  Self.FDelta:= Delta;
-//  Self.FCumulativePopCount:= PopCount;
-//end;
-//
-//constructor TSliceStatus.Create(const Start, Finish: TSlice; const p: TPoint);
-//begin
-//  Self.FCoordinate:= p;
-//  Self.FPopCount:= Finish.Popcount;
-//  Self.FDelta:= Start.Popcount - FPopCount;
-//  Self.FCumulativePopCount:= PopCount;
-//end;
-//
-//function TSliceStatus.GridIsUnique: boolean;
-//begin
-//  Result:= (@self <> nil) and (FPopCount = 1);
-//end;
-//
-//function TSliceStatus.IsInvalid: boolean;
-//begin
-//  Result:= (FPopCount = 0);
-//end;
-//
-//function TSliceStatus.IsValid: boolean;
-//begin
-//  Result:= (FPopCount <> 0);
-//end;
-//
-//
-//procedure TSliceStatus.Update(const A, B: TSlice; const AP, BP: TPoint);
-//var
-//  PopcountA, PopCountB: integer;
-//begin
-//  PopCountA:= A.PopCount;
-//  PopCountB:= B.PopCount;
-//  if (PopCountA < FPopCount) then begin
-//    Update(AP, PopCountA);
-//  end else if (PopcountB < FPopcount) then begin
-//    Update(BP, PopcountB);
-//  end;
-//end;
-//
-//procedure TSliceStatus.Update(const candidate: TSliceStatus);
-//begin
-//  if (candidate.Popcount < FPopcount) and (candidate.Popcount <> 1) then begin
-//    FDelta:= FPopCount - Candidate.PopCount;
-//    FCoordinate:= Candidate.Coordinate;
-//    FPopCount:= Candidate.PopCount;
-//  end;
-//end;
-//
-//procedure TSliceStatus.Update(const P: TPoint; popcount: integer);
-//begin
-//  if (Popcount < FPopcount) and (Popcount <> 1) then begin
-//    Self.FCoordinate:= P;
-//    Self.FDelta:= Self.FPopCount - PopCount;
-//    Self.FPopCount:= Popcount;
-//  end;
-//end;
-//
-//procedure TSliceStatus.Init;
-//begin
-//  if (@Self = nil) then exit;
-//  Self.FCoordinate.x:= 0;
-//  Self.FCoordinate.x:= 0;
-//  Self.FDelta:= 0;
-//  Self.FPopCount:= 512;
-//end;
 
 { TGrid }
+
+function TGrid.AsBitmap(StartX, StartY: integer; out Spillage: TRect): TGridBitmap;
+var
+  x,y: integer;
+  MaxX, MaxY: integer;
+  KnownFragment, UnknownFragment: Uint64;
+  FragmentStatus: TSliverChanges;
+  OutOfBounds: TOutOfBounds;
+begin
+  MaxX:= Min(StartX + (16-1), (FSizeX-1));
+  MaxY:= Min(StartX + (4+1), (FSizeY-1));
+  //A bitmap is a row of 16 pixels numbered like so FEDCBA9876543210
+  //The least significant bytes are on top and the rows gets more significant going down.
+  //Every pixel is one bit.
+  //TSlice.GetBitmap returns a bitmap that looks like this:
+  //-------------210
+  //-------------543
+  //-------------876
+  //----------------
+  Y:= StartY;
+  X:= StartX;
+  Spillage:= Rect(0,0,0,0);   //Assume no spillage
+  while Y <= MaxY do begin
+    while X <= MaxX do begin
+      FragmentStatus:= Item[x,y].GetBitmap(KnownFragment, UnknownFragment);
+      if (FragmentStatus.IsInvalid) then Exit(TGridBitmap.Empty); //It is pointless to calculate
+      OutOfBounds:= Result.PasteFragment(Point(x-StartX, y-Starty), KnownFragment, UnknownFragment);
+      Spillage:= Spillage + OutOfBounds;
+      //Every fragment covers a 3x3 area, therefor we can step through the bitmap
+      //using big steps.
+      {TODO -oJB -cTGrid.AsBitmap : See if stepsize needs to be 2 pixels, because a middle slice is completely defined by its direct neighbors}
+      Inc(x,3);
+    end; {while x}
+    Inc(y,3);
+  end; {while y}
+end;
 
 class operator TGrid.BitwiseOr(const a, b: TGrid): TGrid;
 var
@@ -5362,7 +6172,7 @@ begin
       for x:= 0 to FSizeX-1 do begin
         Result:= SliverSolve(x, y, FSizeX-1, FSizeY-1);
         if (Result.IsInvalid) then goto Done;
-        ChangeCount:= ChangeCount + Result;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
       end; { for y }
     end; { for x }
     if (ChangeCount = 0) then goto Done;
@@ -5418,7 +6228,7 @@ begin
     PivotStatus:= TrailGrid.GridSolve;
     if (PivotStatus.IsChanged) then Result:= TSliverChanges(Changed);
     //////////////////////
-    ///  At this point we could chose to use a recursive approach, but let's keep
+    ///  At this point we could choose to use a recursive approach, but let's keep
     ///  it simple for now.
     //////////////////////
     //If the constellation is (in)valid, we have two options.
@@ -5463,9 +6273,41 @@ begin
   if (ValidCount = 0) then Result:= TSliverChanges.Invalid;
 end;
 
-function TGrid.Split(const Coordinate: TPoint; SolveFirst: boolean): TArray<TGrid>;
+function TGrid.Split(const Coordinate: TPoint; SolveMe: TSolveMe): TArray<TGrid>;
+var
+  Count: integer;
+  i,a: integer;
+  Constellation: integer;
+  Pivot: TSlice;
+  ForcedSlice: TSlice;
+  CloneGrid: TGrid;
+  SolveResult: TSliverChanges;
 begin
-
+  Pivot:= Item[Coordinate];
+  Count:= Pivot.PopCount;
+  SetLength(Result, Count);
+  if (Count = 0) then Exit;
+  Constellation:= -1;
+  a:= 0;
+  for i:= 0 to Count-1 do begin
+    //Iterate
+    Constellation:= Pivot.NextSetBit(Constellation);
+    ForcedSlice.ForceSingleBit(Constellation);
+    CloneGrid:= Self.Clone;
+    CloneGrid.Item[Coordinate]:= ForcedSlice;
+    case SolveMe of
+      smNoSolving: SolveResult:= TSliverChanges.Changed; //Force the clone to be valid
+      smSolveFirst, smSolveAndExcludeInvalids: begin
+        SolveResult:= CloneGrid.GridSolve;
+      end;
+    end;
+    if (SolveMe <> smSolveAndExcludeInvalids) or SolveResult.IsValid then begin
+      Result[a]:= CloneGrid;
+      Inc(a);
+    end;
+  end; {for i}
+  //SetLength is not cheap
+  if (SolveMe = smSolveAndExcludeInvalids) and ((a+1) <> Count) then SetLength(Result,a+1);
 end;
 
 function TGrid.GetSlice(i: integer): TSlice;
@@ -5476,10 +6318,6 @@ end;
 
 { TPointHelper }
 
-function TPointHelper.East(YSize: integer): integer;
-begin
-  Result:= ((x+1) * YSize) + y;
-end;
 
 function TPointHelper.Index(YSize: integer): integer;
 begin
@@ -5491,15 +6329,21 @@ begin
   Result:= (x * YSize) + y;
 end;
 
+function TPointHelper.West(YSize: integer): integer;
+begin
+  Result:= (x * YSize) + y;
+end;
+
+function TPointHelper.East(YSize: integer): integer;
+begin
+  Result:= ((x+1) * YSize) + y;
+end;
+
 function TPointHelper.South(YSize: integer): integer;
 begin
   Result:= (x * YSize) + (y+1);
 end;
 
-function TPointHelper.West(YSize: integer): integer;
-begin
-  Result:= (x * YSize) + y;
-end;
 
 { TGrid.TGridEnumerator }
 
@@ -5519,6 +6363,141 @@ function TGrid.TGridEnumerator.MoveNext: boolean;
 begin
   Inc(FIndex);
   Result:= (FIndex = FMax);
+end;
+
+{ TSliceHelper }
+
+class constructor TSliceHelper.Init;
+var
+  i,a: integer;
+begin
+  FillChar(Bitmask, SizeOf(Bitmask), #0);
+  for i:= 0 to 511 do begin
+    for a:= 0 to 8 do begin
+      if (i and (1 shl a)) <> 0 then Bitmask[a].SetBit(i);
+    end;
+  end;
+end;
+
+{ TGridBitmap }
+
+class function TGridBitmap.Empty: TGridBitmap;
+begin
+  FillChar(Result, SizeOf(Result), #0);
+end;
+
+function TGridBitmap.PasteFragment(p: TPoint; KnownFragment, UnknownFragment: Uint64): TOutOfBounds;
+const
+  Mask: array[-2..2,-2..2] of Uint64 =
+   //-2,-2      -1,-2      0,-2       1,-2       2,-2
+   (($400000000,$600000000,$700000000,$300000000,$100000000),
+   //-2,-1      -1,-1      0,-1       1,-1       2,-1
+    ($400040000,$600060000,$700070000,$300030000,$100010000),
+   //-2,0      -1,0        0,0        1,0        2,0
+    ($400040004,$600060006,$700070007,$300030003,$100010001),
+   //-2,1      -1,1        0,1        1,1        2,1
+    ($000040004,$000060006,$000070007,$000030003,$000010001),
+   //-2,2      -1,2        0,2        1,2        2,2
+    ($000000004,$000000006,$000000007,$000000003,$000000001));
+
+var
+  //The fragment can cross 2 segments
+  Part1, Part2: Uint64;
+
+  procedure Split(var Part1, Part2: Uint64; input: Uint64);
+  begin
+    input:= input and Mask[Result.x, Result.y]; //Remove the out of bounds pixels
+    //The X shift can never shift the input across a 64 bit boundary
+    if (P.X > 0) then Input:= Input shl P.X else Input:= Input shr -P.X;
+    if (P.Y >= 0) then begin
+      Part1:= input shl ((P.Y mod 4) * 16);
+      if ((P.Y mod 4) in [0,1]) then Part2:= 0
+      else Part2:= input shr ((3- (P.Y mod 4)) * 16);
+    end else begin
+      //P.Y < 0
+      Part1:= input shr ((3- (P.Y mod 4)) * 16);
+      Part2:= 0;
+    end; {handle Y}
+  end;
+
+begin
+  Result:= P;
+  if (P.X in [0..13]) then Result.X:= 0
+  else if (P.X > 13) then Result.X:= P.X - 13;
+  if (P.Y in [0..13]) then Result.Y:= 0
+  else if (P.Y > 13) then Result.Y:= P.Y - 13;
+  //Let's process the known fragment first and then do the same for the unknown fragment
+  Split(Part1, Part2, KnownFragment);
+  case P.Y of
+    -2..1,4,5,8,9: FKnownData[(P.Y + 2) mod 4]:= FKnownData[(P.Y + 2) mod 4] or Part1;
+    2..3,6..7,10..11: begin
+      FKnownData[P.Y mod 4]:= FKnownData[P.Y mod 4] or Part1;
+      FKnownData[(P.Y mod 4)+1]:= FKnownData[(P.Y mod 4)+1] or Part2;
+    end;
+    12,13,14,15: FKnownData[3]:= FKnownData[3] or Part1;
+  end; {case}
+
+  Split(Part1, Part2, UnknownFragment);
+  {TODO -oJB -cTGridBitmap.PasteFragment : Fix duplication of case statement}
+  case P.Y of
+    -2..1,4,5,8,9: FUnknownData[(P.Y + 2) mod 4]:= FUnknownData[(P.Y + 2) mod 4] or Part1;
+    2..3,6..7,10..11: begin
+      FUnknownData[P.Y mod 4]:= FUnknownData[P.Y mod 4] or Part1;
+      FUnknownData[(P.Y mod 4)+1]:= FUnknownData[(P.Y mod 4)+1] or Part2;
+    end;
+    12,13,14,15: FUnknownData[3]:= FUnknownData[3] or Part1;
+  end; {case}
+end;
+
+function TGridBitmap.UnknownFuture: TGridBitmap;
+asm
+  //RCX = Self
+  //Self:
+  //    FKnownData: array[0..3] of Uint64;
+  //    FUnknownData: array[0..3] of Uint64; #Every 16 bits holds a row.
+  //movdqu
+
+end;
+
+function TGridBitmap.Validate(const Reference: TGridBitmap): boolean;
+begin
+  //First calculate the t=1 pattern from the t=0 current KnownData
+  //A cellblock is a 128x128 pixel
+  var Block:= TCellBlock.Create(0,0,nil);
+  Block.p[5+0].q[0]:= Self.FKnownData[0];
+  Block.p[5+0].q[1]:= Self.FKnownData[1];
+  Block.p[5+4].q[0]:= Self.FKnownData[2];
+  Block.p[5+4].q[1]:= Self.FKnownData[3];
+  Block.GeneratePtoQ;
+  //Now we have the result in Block.Q, but offset 1 pixel to the NorthWest (or was it SouthEast?)
+  //Mask off the unknown bits
+
+  //First we need to move the unknown bits 1 pixel to the south, north, east and west.
+  //This extends the unknown area to its future lightcone
+  //Then we compensate for the staggerstepping by GeneratePtoQ
+  //Xor it with the norm pattern
+  //Mask with the unknown bits
+  //If there are still non-zero bits, then the pattern does not match and we return false.
+end;
+
+{ TOutOfBounds }
+
+class operator TOutOfBounds.Add(a: TRect; b: TOutOfBounds): TRect;
+begin
+  if (TPoint(b) = Point(0,0)) then Exit(a)
+  else begin
+    Result:= Rect(Min(a.Left, b.x), Min(a.Top, b.y), Max(a.Right, b.x), Max(a.Bottom, b.y));
+  end;
+end;
+
+class operator TOutOfBounds.Implicit(a: TPoint): TOutOfBounds;
+begin
+  Result.FData:= a;
+end;
+
+class operator TOutOfBounds.Implicit(a: TOutOfBounds): TPoint;
+begin
+  Result:= a.FData;
 end;
 
 end.
