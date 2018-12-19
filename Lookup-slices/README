@@ -1,0 +1,9 @@
+Source code for my Master's project.
+
+Project1 is assorted experiments, which may be removed later.
+
+Project2 is the prototype for the solver engine.
+
+It uses the `GridWalker` algorithm to try and prove that a given pattern is a Garden of Eden.
+
+
