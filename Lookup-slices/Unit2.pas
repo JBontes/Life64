@@ -465,7 +465,7 @@ type
   /// <summary>
   ///  Deprecated, a superslice is the union between to slices, a 4x3 area.
   ///  However, unexpectatly taking the intersection (a 2x3 slice) performs
-  ///  exactly the same as taking the union (a 4x3).
+  ///  exactly (as in identical) the same as taking the union (a 4x3).
   ///  the latter is much more expensive, so we drop this.
   ///  Only the lookUp functions are still used, I should probably refactor this
   /// </summary>
@@ -1035,6 +1035,12 @@ type
     BtnCreateLookup5x5to3x3UsingSpeculativeExploration: TButton;
     BtnInitWithGoE2: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
+    /// <summary>
+    ///  We can create a lookup table by enumerating all 7x7 bitmaps.
+    ///  This is working forward in time, relying on the forward deterministicness of Life.
+    ///  But this same lookup table can also be created by the solver by reasoning backwards.
+    ///  The two tables are nearly identical (0.5% difference).
+    /// </summary>
     procedure BtnCreateLookupUsingSolverClick(Sender: TObject);
     procedure BtnRotateCounterClick(Sender: TObject);
     procedure BtnInitWith_GoEClick(Sender: TObject);
@@ -1196,6 +1202,9 @@ type
   TRotation = (rNone, rCounter, rClock, r180);
 
 procedure Move(const source; var Dest; Size: NativeInt);
+//RCX = @source
+//RDX = @dest
+//r8 = size
 asm
   mov r9,rdi         //save regs
   mov r10,rsi        //save regs
@@ -1247,7 +1256,9 @@ asm
   rol rax,cl
 end;
 
-
+//Some code to make sure that all cores on the processor are
+//enabled. Without this code the program will only run on a single
+//core, killing multi-threaded performance.
 type
   TGetCurrentProcessorNumber = function: dword;
 
@@ -1265,7 +1276,6 @@ begin
   if not Assigned(Result) then raise Exception.Create('oops');
 end;
 
-
 var
   _GetCurrentProcessorNumber:TGetCurrentProcessorNumber;
 
@@ -1275,6 +1285,11 @@ begin
   Result:= _GetCurrentProcessorNumber;
 end;
 
+/// <summary>
+///  Remove a single bit from the middle of a int.
+///  e.g. DeleteBit(01010101, 4) converts 01010101 to 0100101
+///  zeros are always added to the MSB, even if the number is negative.
+/// </summary>
 function DeleteBit(input, BitToDelete: integer): integer;
 var
   before, after: integer;
@@ -1284,7 +1299,10 @@ begin
   Result:= before or after;
 end;
 
-
+/// <summary>
+///  Delete multiple bits from `input`.
+///  See DeleteBit above
+/// </summary>
 function DeleteBits(input: integer; BitsToDelete: TMaskedBits): integer;
 var
   i: integer;
@@ -1296,6 +1314,10 @@ begin
   Result:= input;
 end;
 
+/// <summary>
+///  Extract the x and y offset.
+///  Note that positive offsets are to the East and North and negative offsets to the West and South
+/// </summary>
 procedure TOffsetHelper.XY(out E_offset, N_offset: integer);
 var
   UnknownOffset: integer;
@@ -1306,6 +1328,9 @@ begin
   E_offset:= (UnknownOffset div 7) - 3;
 end;
 
+/// <summary>
+///   Insert a zero bit at the given position.
+/// </summary>
 function InsertZeroBit(value: integer; pos: integer): integer;
 var
   x, y: integer;
@@ -1323,6 +1348,9 @@ begin
   Result:= x or y;
 end;
 
+/// <summary>
+///   Transform every byte in the input into single bit in the result
+/// </summary>
 function Remove012(const Data8: uint64): byte;
 type
   TMyBytes = array [0 .. 7] of byte;
@@ -1344,6 +1372,10 @@ begin
   Result:= IComparer<TSlice>(FComparer);
 end;
 
+/// <summary>
+///   Fix for older versions of Delphi that have a bug
+///   when reading files > 2 GB.
+/// </summary>
 type
   TFileStream = class(System.Classes.TFileStream)
     function Read64(Buffer: TBytes; Offset, Count: int64): int64; reintroduce;
@@ -1375,6 +1407,7 @@ begin
     Form2.TaskBar1.ProgressState:= TTaskBarProgressState.None;
   end;
 end;
+
 
 procedure TForm2.BtnProcessSliceLookupClick(Sender: TObject);
 var
@@ -1471,7 +1504,9 @@ end;
 
 procedure TForm2.BtnRunSingleTestClick(Sender: TObject);
 begin
-  //Put a failing test and breakpoint here if you need to debug it.
+  //Put a failing test and breakpoint here if you need to debug it
+  //but do not want to wait for all other the tests to run.
+  //Right now we have no failing tests.
 end;
 
 procedure TForm2.BtnInitWithGoE2Click(Sender: TObject);
@@ -1493,6 +1528,9 @@ asm
   setc al
 end;
 
+/// <summary>
+///  Transpose a slice using the input array to transpose the bits
+/// </summary>
 class function TSlice.GetReordering(Order: TArray<integer>; const Input: TArray<integer>): TArray<integer>;
 var
   i, j, k, Mask: integer;
@@ -1511,9 +1549,7 @@ begin
   end; { for i }
 end;
 
-
-
-
+//collect statistics on the counts lookup table.
 procedure TForm2.BtnProcess_7x7_CountLookupClick(Sender: TObject);
 var
   FS: TFileStream;
@@ -1548,6 +1584,10 @@ begin
     'index= ' + MaxIndex.ToString + ' ' + 'Avg= ' + Avg.ToString;
 end;
 
+/// <summary>
+///   Take the bitmap from the on-screen image
+///   and transform it into a format the solver can understand.
+/// </summary>
 function GetFutureCake(const SG: TStringGrid; col, row: integer): TCake;
 var
   x, y: integer;
@@ -1564,6 +1604,9 @@ begin
   end; {for y}
 end;
 
+/// <summary>
+///   Deprecated, part of a failed approach.
+/// </summary>
 function GetFutureStandingChunk(const SG: TStringGrid; col, row: integer): integer;
 var
   x, y: integer;
@@ -1579,6 +1622,9 @@ begin
   end; { for y }
 end;
 
+/// <summary>
+///   Deprecated, part of a failed approach.
+/// </summary>
 function GetFutureFlatChunk(const SG: TStringGrid; col, row: integer): integer;
 var
   x, y: integer;
@@ -1594,18 +1640,27 @@ begin
   end; { for y }
 end;
 
+
+/// <summary>
+///   Take the 5x5 on-screen bitmap and transform the resulting cake into a slice.
+/// </summary>
 function FutureGridToPastSlice(const SG: TStringGrid; col, row: integer; const LookupTable: TLookupTable; KnownOffset: TOffset): TSlice;
 var
   Cake: TCake;
 begin
   Cake:= GetFutureCake(SG, col, row);
-  if (Cake.IsKnown) then begin
+  if (Cake.IsKnown) then begin  //do we have no unknown pixels?
     Result:= LookupTable[KnownOffset, Cake.Known];
-  end else begin
+  end else begin  //Oops, unknown pixels
     Result:= Form2.UnknownSlice(Cake);
   end;
 end;
 
+/// <summary>
+///   Take a single on-screen pixel and transform it into a slice.
+///   This means there can be only 3 possible outputs
+///   ON slice 140 states, OFF slice 372 states, unknown slice 512 states
+/// </summary>
 function FutureGridToPastSliceSimple(const SG: TStringGrid; col, row: integer; const LookupTable: TLookupTable): TSlice;
 var
   ZeroSlice, OneSlice: TSlice;
@@ -1617,6 +1672,9 @@ begin
   else Result:= ZeroSlice;
 end;
 
+/// <summary>
+///   Display the constellation-counts of a slice on-screen.
+/// </summary>
 procedure DisplaySlices(SG, SGDiff: TStringGrid; Slices: TGrid; ForceRefresh: boolean = false);
 var
   x, y: integer;
@@ -1671,6 +1729,9 @@ asm
   popcnt rax,rcx
 end;
 
+/// <summary>
+///   Fast int64 random numbers.
+/// </summary>
 function Random64: Uint64;
 const
   a: uint64 = 2862933555777941757;
@@ -1681,6 +1742,11 @@ begin
   Result:= TSlice.RandomSeed;
 end;
 
+/// <summary>
+///   Deprecated!
+///   Perform a single run of gridwalker on the grid
+///   using SuperSlices (the union of two slices).
+/// </summary>
 procedure DoARun(Rotation: TRotation = rNone);
 var
   SS: TSuperSlice;
@@ -1803,6 +1869,10 @@ begin
   else Result:= TSliverChanges.Changed;
 end;
 
+//From the two slices for a single pixel, reason over every possible
+//5x5 bitmap to get a lookup table with ancestors for every possible 5x5.
+//Running this takes about 4 to 8 hours depending on your CPU.
+//This routine uses speculative exploration.
 procedure TForm2.CreateLookupUsingGridSolver(ThreadIndex, ThreadCount: integer; var data: TArray<TSlice>);
 type
   TImprovementDetails = array[0..10] of integer;
@@ -1908,6 +1978,10 @@ Done:
   end;
 end;
 
+//From the two slices for a single pixel, reason over every possible
+//5x5 bitmap to get a lookup table with ancestors for every possible 5x5.
+//Running this takes about 4 to 8 hours depending on your CPU.
+//This routine DOES NOT use speculative exploration.
 procedure TForm2.BtnCreateLookupUsingSolverClick(Sender: TObject);
 const
   MaxXY = 4;
@@ -2044,6 +2118,9 @@ begin
   FS.Free;
 end;
 
+//deprecated
+//Rotating stuff, does not work correctly
+//No longer needed
 procedure TForm2.BtnRotateCounterClick(Sender: TObject);
 var
   Slice: TSlice;
@@ -2054,11 +2131,14 @@ begin
   end;
 end;
 
+//Start with the hard GoE.
 procedure TForm2.BtnInitWith_GoEClick(Sender: TObject);
 begin
   InitWithGoE;
 end;
 
+//Deprecated.
+//No longer used.
 procedure TForm2.BtnLoadSmallLookupsClick(Sender: TObject);
 var
   FS: TFileStream;
@@ -2082,6 +2162,7 @@ begin
   FileOpenDialog1.Title:= OldTitle;
 end;
 
+//Test code, not sure what this does
 procedure TForm2.BtnTest_TSliceNextSetBitClick(Sender: TObject);
 var
   S: TSlice;
@@ -2097,6 +2178,7 @@ begin
   end;
 end;
 
+//Early test code, should be removed, now that we have a full set of unit tests.
 procedure TForm2.BtnTestCalcSouthClick(Sender: TObject);
 var
   Index: integer;
@@ -2169,6 +2251,11 @@ begin
   end; { for i }
 end;
 
+//Starting with the 2GB known 7x7->5x5->3x3 lookup table
+//Make 48 lookup tables for all the different ways in with a
+//known 5x5 rect and an unknown 5x5 rect can overlap.
+//Some overlaps are excluded, because we already know the result
+//will be a table filled with fully unknown `512` slices.
 procedure TForm2.BtnCreateUnknownLookupTableClick(Sender: TObject);
 var
   i: integer;
@@ -2730,6 +2817,7 @@ begin
 end;
 
 
+//Slow version of DeleteBit for unit testing
 function DeleteBitAlternative(input, BitTodelete: integer): integer;
 var
   i: integer;
@@ -2742,6 +2830,8 @@ begin
   end;
 end;
 
+//Deprecated
+//Old test code, should be removed.
 procedure TForm2.BtnTestDeleteBitClick(Sender: TObject);
 var
   i,j: integer;
@@ -2755,6 +2845,8 @@ begin
   end;
 end;
 
+//TestInsight is a IDE plugin that automatically runs tests in the background
+//if the source code has changed.
 function IsTestInsightRunning: Boolean;
 var
   client: ITestInsightClient;
@@ -2764,6 +2856,7 @@ begin
   Result := not client.HasError;
 end;
 
+//Perform a double round of solving.
 procedure TForm2.Action_SliverSolveRoundExecute(Sender: TObject);
 const
   ForceRefresh = true;
@@ -2778,17 +2871,21 @@ begin
   DisplaySlices(StringGrid2, StringGrid3, MySlices, ForceRefresh);
 end;
 
+//Run any tests that failed previously, so we can debug.
 procedure TForm2.BtnDoFailingTestsClick(Sender: TObject);
 begin
   UnknownSlice(TCake.Create(524560,32742631));
 end;
 
+//Force unit tests to run when debugging the application in the IDE.
 procedure TForm2.BtnStartUnitTestsClick(Sender: TObject);
 begin
   if IsTestInsightRunning then TestInsight.DUnitX.RunRegisteredTests
   else ShowMessage('Run the tests inside the IDE using TestInsight');
 end;
 
+//Create unknown slices by folding all different possible permutations
+//of known slices that fit the unknown describtion together.
 function TForm2.FoldRemaining(Offset: TOffset; UnknownMask, KnownMask: integer; Filter: boolean = false): TSlice;
 
   function FoldUnknownBits(Offset: TOffset; const UnknownBits: TMaskedBits; Count: integer; Start: integer): TSlice;
@@ -2822,7 +2919,12 @@ begin
   Result:= FoldUnknownBits(Offset, UnknownBits, UnknownBits.Count, KnownMask);
 end;
 
-
+//Create any unknown slice on the fly.
+//First select the unknown lookuptable that fits the unknown pixels listed.
+//If there are any unknown pixels left, fold states as needed.
+//Unless we have a checkerboard pattern, the number of additional
+//foldings should be small. In the worst case this can take a long time.
+//Luckily this operation needs to be performed only once in per pattern.
 function TForm2.UnknownSlice(Cake: TCake): TSlice;
 const
   MaskEW: array[W3..E3] of integer = ($1CE739C, $18C6318, $1084210, $FFFFFFF, $108421, $318C63, $739CE7);
@@ -2987,6 +3089,7 @@ begin
   end;
 end;
 
+//Get some statistics, no longer relevant
 class procedure TForm2.LeadingTrailingPopCount(UnknownMask: integer; out Leading, Trailing, Popcnt: integer);
 asm
   //ecx = UnknownMask
@@ -3005,6 +3108,10 @@ asm
   mov [r9],eax
 end;
 
+//If we want to iterate all set bits in a int64, we can do a for loop
+//however that is slow. Better to use the intrinsics in the CPU to
+//mask off the parts we have already scanned and then scan for the next
+//bit. This is esp. efficient if there are few bits set.
 class function TForm2.GetNextBitSet(previous: integer; i: Uint64): integer;
 asm
   //ecx = previous
@@ -3172,9 +3279,10 @@ end;
   // FS.Free;
   // {TODO -oJB -cAdd stuff : How to add the lookupUnknown for the corners (NE, SW etc)}
   // {TODO -oJB -cSave : Save the lookup unknown data}
-
 {$EndRegion}
 
+//deprecated
+//This code is no longer relevant, because this approach was dumped.
 procedure TForm2.BtnSolveWithChunkLookupClick(Sender: TObject);
 var
   x, y: integer;
@@ -3201,6 +3309,9 @@ begin
   MySlices:= Slices;
 end;
 
+//Recreate a corner lookup table to make sure the GPU generated
+//these tables correctly.
+//takes a long time to run.
 procedure TForm2.BtnValidateN1E1LookupTableClick(Sender: TObject);
 
   function RotateLeft90(Input: integer): integer;
@@ -3238,9 +3349,9 @@ begin
     b:= LookupE1[i];
     if (a <> b) then ShowMessage('Oops');
   end;
-
 end;
 
+//display a 5x5 bitmap on-screen
 procedure TForm2.Display5x5(Cake: TCake; const SG: TStringGrid);
 var
   x, y: integer;
@@ -3259,6 +3370,7 @@ begin
   end;
 end;
 
+//The total of the counts table ought to add up to 2^49, let's make sure
 procedure TForm2.BtnValidateCountTableClick(Sender: TObject);
 var
   Soll, Ist: uint64;
@@ -3298,6 +3410,12 @@ begin
   BtnValidateCountTable.Caption:= 'MinOn=' + MinOn.ToString + ' MinOff=' + MinOff.ToString;
 end;
 
+//deprecated
+//warning !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//Apply the corner lookup tables. This reuses the GPU exploration
+//to reduce the number of states further than just the core
+//lookup table can.
+//warning does not work with unknown pixels yet!!!
 procedure TForm2.BtnApplyNELookupTablesClick(Sender: TObject);
 var
   x, y: integer;
@@ -3339,6 +3457,13 @@ begin
   MySlices:= Slices;
 end;
 
+
+{TODO -oJB -cTForm2.BtnApplyNELookupTablesClick : Make the corner lookups work with unknown pixels}
+//warning !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//Apply the corner lookup tables. This reuses the GPU exploration
+//to reduce the number of states further than just the core
+//lookup table can.
+//warning does not work with unknown pixels yet!!!
 procedure TForm2.BtnApplyCornerLookupTablesClick(Sender: TObject);
 var
   x, y: integer;
@@ -3400,6 +3525,9 @@ begin
   MySlices:= Slices;
 end;
 
+/// <summary>
+///   Load a lookuptable with slice data from disk
+/// </summary>
 procedure TForm2.LoadLookupTable(var LookupTable: TArray<TSlice>);
 var
   FS: TFileStream;
@@ -3412,6 +3540,10 @@ begin
   FS.Free;
 end;
 
+/// <summary>
+///  Create a grid from the bitmap on-screen
+///  And apply the lookup table to all slices in that grid.
+/// </summary>
 procedure TForm2.BtnAppyLookupTableClick(Sender: TObject);
 begin
   // Read the lookup table
@@ -3433,6 +3565,11 @@ begin
   MySlices:= Slices;
 end;
 
+//Do a single round of solving using chunks.
+//Because this gives the exact same effect as using slivers,
+//we can use it as a test to make sure we did not screw up the sliver
+//solve code.
+{TODO -oJB -cTForm2.BtnSolveRoundUsingChunksClick : Make sure chunk solve works the same as sliver solve (sliver is optimized, chunk is not)}
 procedure TForm2.BtnSolveRoundUsingChunksClick(Sender: TObject);
 begin
   DoARun;
@@ -3450,11 +3587,17 @@ begin
   end; { for y }
 end;
 
-  function SingleProcessorMask(const ProcessorIndex: Integer): DWORD_PTR;
-  begin
-    Result := 1 shl (ProcessorIndex);
-  end;
+//Check to see which processor cores are enabled for this process.
+function SingleProcessorMask(const ProcessorIndex: Integer): DWORD_PTR;
+begin
+  Result := 1 shl (ProcessorIndex);
+end;
 
+//Start up as many threads as the CPU has cores
+//And try and recreate the 7x7->5x5->3x3 lookup table using
+//1x1          ->3x3   ->5x5                    ->3x3
+//single pixel->slice, for every pixel in 5x5, eliminate impossible constellations from slices
+//using speculative exploration.
 procedure TForm2.BtnCreateLookup5x5to3x3UsingSpeculativeExplorationClick(Sender: TObject);
 var
   FS: TFileStream;
@@ -3505,6 +3648,7 @@ begin
   end;
 end;
 
+//Test the mini-lookups used for transforming slices to slivers
 procedure TForm2.BtnTestLookup0_012Click(Sender: TObject);
 type
   TW3 = array [0 .. 3] of word;
@@ -3541,6 +3685,8 @@ begin
   end;
 end;
 
+//calculate slices using only single pixels as information.
+//does not really do any solving, just looks up single pixels.
 procedure TForm2.BtnMinimalSolveClick(Sender: TObject);
 var
   x, y: integer;
@@ -3568,6 +3714,8 @@ end;
 // 543     147
 // 876     258
 
+//deprecated
+//old test code, no longer relevant, because we don't do tensor transposes anymore.
 procedure TForm2.Button8Click(Sender: TObject);
 var
   Ordering: TArray<integer>;
@@ -3595,18 +3743,21 @@ begin
   ShowNewLayout;
 end;
 
+//deprecated
 function TForm2.GetCounterLayout: TArray<integer>;
 begin
   Button8Click(Form2);
   Result:= NewLayout;
 end;
 
+//deprecated
 procedure TForm2.BtnSolveCounterClick(Sender: TObject);
 begin
   DoARun(rCounter);
   DisplaySlices(StringGrid2, StringGrid3, MySlices);
 end;
 
+//display all allowed constellations in a slice.
 procedure TForm2.ShowNewLayout;
 var
   row, col: integer;
@@ -3622,6 +3773,12 @@ begin
   end;
 end;
 
+//Init the on-screen display with a given pattern.
+//'X' = on
+//'.' = end of data
+//',' = new line
+//' ' = off
+//'?' = unknown
 procedure TForm2.InitWithPattern(const Pattern: string);
 begin
   var SG:= StringGrid1;
@@ -3643,6 +3800,7 @@ begin
   end;
 end;
 
+//Easy GoE, can be solved trivially
 procedure TForm2.InitWithGoE2;
 const
   Pattern: string = '-X-XXX-X--,'
@@ -3659,6 +3817,7 @@ begin
   InitWithPattern(Pattern);
 end;
 
+//Hard GoE
 procedure TForm2.InitWithGoE;
 const
   Pattern: string = '?-X---X-??,' +
@@ -3675,12 +3834,14 @@ begin
   InitWithPattern(Pattern);
 end;
 
+//Called when the app,ication starts up.
 procedure TForm2.FormCreate(Sender: TObject);
 begin
   InitWithGoE;
   InitNewLayout;
 end;
 
+//Called whenever the form receives focus
 procedure TForm2.FormActivate(Sender: TObject);
 var
   Filename: string;
@@ -3734,6 +3895,8 @@ begin
   ShowNewLayout;
 end;
 
+//Initializes a list of all allowed constellations in a slice
+//with numbers 0..511, i.e. a fully unknown `512` slice.
 procedure TForm2.InitNewLayout;
 var
   i: integer;
@@ -3743,6 +3906,15 @@ begin
 end;
 
 
+/// <summary>
+///  Performs speculative exploration starting the given slice
+///  For every single constellation in the slice at x,y
+///  Make a copy of the grid
+///  for slice(x,y) force it to a single constellation
+///  Run Gridwalker, until no more improvement, or contradiction
+///  if valid, then add that constellation to the result.
+///  return result
+/// </summary>
 function CheckSlicesStates(x,y: integer): TArray<integer>;
 var
   StartStates: TArray<integer>;
@@ -3770,6 +3942,11 @@ begin
   SetLength(Result, ValidCount);
 end;
 
+/// <summary>
+///  StringGrid5 (I should rename this) contains a list of all valid constellations
+///  for a previously selected slice
+///  If we click on a constellation, see if this constellation is actually valid.
+/// </summary>
 procedure TForm2.StringGrid5DblClick(Sender: TObject);
 var
   ForceState: integer;
@@ -3793,11 +3970,13 @@ begin
   end;
 end;
 
+//Return 'X','?',' ' if pixel is ON, UNKNOWN, or OFF respectively.
 function TForm2.GetPixelChar(x, y: integer; SG: TStringGrid): Char;
 begin
   Result:= (SG.Cells[SG.col, SG.row] + ' ')[1];
 end;
 
+//Change a pixel (or many pixels) in the pattern bitmap.
 procedure TForm2.StringGrid1DblClick(Sender: TObject);
 var
   a: Char;
@@ -3817,12 +3996,15 @@ begin
   end; {for R}
 end;
 
+//Allow us to draw a rect, changing a bunch of pixels in one go.
 procedure TForm2.StringGrid1MouseUp(Sender: TObject; Button: TMouseButton;
     Shift: TShiftState; X, Y: Integer);
 begin
   StringGrid1DblClick(Sender);
 end;
 
+//Activate the slice under to cursor and display its allowed
+//constellation in the list of valid constellations
 procedure TForm2.StringGrid2Click(Sender: TObject);
 var
   x, y: integer;
@@ -3865,6 +4047,7 @@ begin
   CloneSlices:= MySlices.Clone;
 end;
 
+//Draw a visuallisation of the slices
 procedure TForm2.StringGrid2DrawCell(Sender: TObject; ACol, ARow: integer; Rect: TRect; State: TGridDrawState);
 var
   C: TCanvas;
@@ -3901,6 +4084,11 @@ begin
   SetTextAlign(C.Handle, OldAlignment);
 end;
 
+//Display the number of allowable states for each of the 9 pixels in the slice.
+//When the number of allowed constellations becomes low, some pixels in the
+//3x3 grid that form a clice becomes forced.
+//I one thought this would be useful, but gridwalker already forwards
+//this knowledge perfectly.
 procedure TForm2.StringGrid3Click(Sender: TObject);
 var
   x, y: integer;
@@ -3916,6 +4104,7 @@ begin
   end;
 end;
 
+//Draw the allowed constellations of the currently selected slice.
 procedure TForm2.StringGrid4DrawCell(Sender: TObject; ACol, ARow: integer; Rect: TRect; State: TGridDrawState);
 var
   SG: TStringGrid;
@@ -3986,6 +4175,7 @@ end;
 
 { TSlice }
 
+//Operator overloading >
 class operator TSlice.GreaterThan(const a, b: TSlice): boolean;
 var
   i: integer;
@@ -3997,11 +4187,13 @@ begin
   Result:= false;
 end;
 
+//generated by rolling a dice 6 times, guarenteed to be random.
 class constructor TSlice.InitRandomSeed;
 begin
   TSlice.RandomSeed:= 546546;
 end;
 
+//we no longer test bits in a slice one by one.
 //function TSlice.IsBitSet(Bit: integer): boolean;
 ////begin
 ////  System.Assert((Bit >= 0) and (Bit <= 511));
@@ -4017,6 +4209,7 @@ end;
 
 function TSlice.IsZero: boolean;
 asm
+//We should really get rid of all SSE code and only use AVX.
   //test to see if every bit in the slice is zero
   //RCX = self
 //  pcmpeqq xmm0,xmm0   //FFFFFFF...
@@ -4031,17 +4224,17 @@ asm
 //  setz al
 //  rep ret
 
-db  $c4,$e2,$79,$29,$c0           //vpcmpeqq xmm0,xmm0,xmm0
-db  $c4,$e2,$79,$17,$01           //vptest xmm0,[rcx]
-db  $75,$16                       //jne     <Done>
+db  $c4,$e2,$79,$29,$c0           //vpcmpeqq xmm0,xmm0,xmm0   //xmm0=0
+db  $c4,$e2,$79,$17,$01           //vptest xmm0,[rcx]         //[rcx]=0?
+db  $75,$16                       //jne     <Done>            //no, -> done
 db  $c4,$e2,$79,$17,$41,$10       //vptest xmm0,[rcx+$10]
 db  $75,$0e                       //jne     <Done>
 db  $c4,$e2,$79,$17,$41,$20       //vptest xmm0,[rcx+$20]
 db  $75,$06                       //jne     <Done>
-db  $c4,$e2,$79,$17,$41,$30        //vptest xmm0,[rcx+$30]
+db  $c4,$e2,$79,$17,$41,$30       //vptest xmm0,[rcx+$30]
 @Done:
 db  $0f,$94,$c0                   //sete   al
-db  $f3,$c3                       //repz ret
+db  $f3,$c3                       //repz ret                  //rep ret for AMD
 end;
 
 class operator TSlice.LessThan(const a, b: TSlice): boolean;
@@ -4055,6 +4248,9 @@ begin
   Result:= false;
 end;
 
+//Get the next bit set, starting from bit(previous+1)
+//Mask off the bits already processed
+//and from that point onward look for the next set bit.
 function TSlice.NextSetBit(previous: integer): integer;
 asm
   // RCX: self
@@ -4122,6 +4318,7 @@ asm
   lea eax,[edx+r10d]
 end;
 
+//used for printing to a memo for debug purposes
 function TSlice.Print: string;
 var
   i, j, a: integer;
@@ -4137,6 +4334,7 @@ begin
   end; { for i }
 end;
 
+//print to string for debug purposes
 class function TSlice.Print5x5(item: integer): string;
 var
   i, Index: integer;
@@ -4151,6 +4349,7 @@ begin
   end;
 end;
 
+//did we not code this somewhere else already?
 class function TSlice.Random: TSlice;
 const
   a: uint64 = 2862933555777941757;
@@ -4165,6 +4364,7 @@ begin
   end;
 end;
 
+//Return the allowed constellations as an array of int.
 function TSlice.GetStates: TArray<integer>;
 var
   i, a: integer;
@@ -4180,7 +4380,8 @@ begin
   end;
 end;
 
-
+//deprecated
+//Tensor transpose of a slice, we no longer do transposing
 procedure TSlice.ReorderSlice(const Reordering: TArray<integer>);
 var
   i: integer;
@@ -4193,6 +4394,7 @@ begin
   end;
 end;
 
+//Set a bit ON or OFF, note that the index may be negative
 procedure TSlice.SetBit(Index: integer; value: boolean = true);
 //var
 //  One: uint64;
@@ -4226,12 +4428,18 @@ asm
   rep ret
 end;
 
+//Clear the slice and force a single allowed constellation
 procedure TSlice.ForceSingleBit(Index: integer);
 begin
   FillChar(Self, SizeOf(TSlice), 0);
   Self.SetBit(index);
 end;
 
+
+//Try to see if we can extract a known pixel from a slice.
+//If the popcount is low, any ofn the 9 pixels might just be in OFF or ON
+//in every constellation.
+//We use this to piece together a bigger bitmap to be used in Speculative evolution.
 function TSlice.GetBitmap(out KnownBitmap, UnknownBitmap: UInt64): TSliverChanges;
 var
   OnBitmap: integer;
@@ -4253,7 +4461,7 @@ begin
   //Else we do a check against a bitmask per pixel.
   //There are 9 pixels, so 9 checks.
   case Self.PopCount of
-    0: Exit(TSliverChanges.Invalid);
+    0: Exit(TSliverChanges.Invalid);    //Do not stress about the fact that our out parameters are undefined.
     1..16: begin
       while (Index < 512) do begin
         OnBitmap:= OnBitmap or Index;       //OR only adds pixels
@@ -4278,6 +4486,7 @@ begin
   UnknownBitmap:= (UnknownBitmap and 7) xor ((UnknownBitmap and $38) shl 13) xor ((UnknownBitmap and $1C0) shl (10+16))
 end;
 
+//result := a AND b
 class operator TSlice.BitwiseAnd(const a, b: TSlice): TSlice;
 //var
 //  i: integer;
@@ -4436,12 +4645,14 @@ begin
   FillChar(Self, SizeOf(TSlice), #0);
 end;
 
+//Count the number of constellations that predict a given pixel to be ON
 function TSlice.CountAlive(Pixel: integer): integer;
 begin
   System.Assert((Pixel >= 0) and (Pixel <= 8));
   Result:= (Self and not(OffMask[Pixel])).PopCount;
 end;
 
+//Count the number of constellations that predict a given pixel to be OFF
 function TSlice.CountDead(Pixel: integer): integer;
 begin
   System.Assert((Pixel >= 0) and (Pixel <= 8));
@@ -4495,7 +4706,7 @@ asm
 //@done:
 //  sete al
 //  rep ret
-db  $c4,$42,$01,$29,$ff        //vpcmpeqq xmm15,xmm15,xmm15
+db  $c4,$42,$01,$29,$ff        //vpcmpeqq xmm15,xmm15,xmm15  ;XMM15 =-1
 db  $c5,$fa,$6f,$01            //vmovdqu xmm0,[rcx]
 db  $c5,$f9,$ef,$02            //vpxor  xmm0,xmm0,[rdx]
 db  $c4,$c2,$79,$17,$c7        //vptest xmm0,xmm15
