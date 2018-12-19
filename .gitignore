@@ -49,6 +49,7 @@
 *.cfg
 *.hpp
 *Resource.rc
+*.otares
 
 # Delphi local files (user-specific info)
 *.local
