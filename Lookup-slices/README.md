@@ -1,3 +1,5 @@
+**Searching for Life patterns**  
+
 Source code for my Master's project.
 
 Project1 is assorted experiments, which may be removed later.
