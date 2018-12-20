@@ -6674,7 +6674,7 @@ end;
 function TGridBitmap.Validate(const Reference: TGridBitmap): boolean;
 begin
   //First calculate the t=1 pattern from the t=0 current KnownData
-  //A cellblock is a 128x128 pixel
+  //A cellblock is a 64x64 pixel
   var Block:= TCellBlock.Create(0,0,nil);
   Block.p[5+0].q[0]:= Self.FKnownData[0];
   Block.p[5+0].q[1]:= Self.FKnownData[1];
@@ -6684,8 +6684,17 @@ begin
   Block.ToDoList.Activate(5+4);
   Block.GeneratePtoQ;
   //Now we have the result in Block.Q, but offset 1 pixel to the NorthWest (or was it SouthEast?)
+  {TODO -oJB -cTGridBitmap.Validate : DoubleCheck offset direction of PtoQ}
+  var QuadN:= Block.q[5+0].OffsetToNW; //I may need to change this to OffsetToSE if I guessed wrong
+  var QuadS:= Block.q[5+4].OffsetToNW;
+  //Reduce the 16x16 pixel block to 15x15
+  var N:= QuadN.SE or QuadS.NE;
+  var S:= QuadS.SE;
   //Mask off the unknown bits
   //First we need to move the unknown bits 1 pixel to the south, north, east and west.
+  var UnknownN:= TUnit((@FUnknownData[0])^);
+  var UnknownS:= TUnit((@FUnknownData[2])^);
+
 
   //This extends the unknown area to its future lightcone
   //Then we compensate for the staggerstepping by GeneratePtoQ

@@ -27,7 +27,6 @@ type
   /// </summary>
   TDirection = (dN,dW,dNW,dS,dE,dSE);
 
-  { TUnit }
 
 const
   BytesPerUnit = 16;  //Units are made up of XMM words.
@@ -99,6 +98,15 @@ type
     function IsActiveP2(direction: TDirection): boolean;
   end;
 
+  TTwin<T> = record
+  public
+    A,B: T;
+  end;
+
+  TQuad<T> = record
+    NE, SE, SW, NW: T;
+  end;
+
   PUnit = ^TUnit;
   /// <summary>
   ///  A Unit is a 16 x 8 pixel subunit of the universe
@@ -109,6 +117,13 @@ type
     procedure Display(const BitmapStart: pointer; const LineOffset: integer);
     procedure SetPixel(x,y: integer; value: boolean = true);
     function GetPixel(x, y: integer): boolean;
+    function OffsetToNW: TQuad<TUnit>;
+    function OffsetToSE: TQuad<TUnit>;
+    function OffsetToN: TTwin<TUnit>;
+    function OffsetToS: TTwin<TUnit>;
+    function OffsetToE: TTwin<TUnit>;
+    function OffsetToW: TTwin<TUnit>;
+    class operator BitwiseOr(const A,B: TUnit): TUnit;
     case integer of
       1: (b: array[0..MaxBytesPerUnit] of byte);
       2: (w: array[0..(BytesPerUnit div 2)-1] of word);
@@ -1309,6 +1324,12 @@ end;
 
 
 
+class operator TUnit.BitwiseOr(const A, B: TUnit): TUnit;
+begin
+  Result.q[0]:= A.q[0] or B.q[0];
+  Result.q[1]:= A.q[1] or B.q[1];
+end;
+
 procedure TUnit.Display(const BitmapStart: pointer; const LineOffset: integer);
 asm
   ///  rcx = self
@@ -1357,6 +1378,96 @@ var
 begin
   Mask:= 1 shl x;
   Result:= w[y] and Mask <> 0;
+end;
+
+function TUnit.OffsetToE: TTwin<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  psllw  xmm0,1      //Remove the east-most row
+  psrlw  xmm1,15     //keep only the east-most row
+  movdqu [rdx],xmm0
+  movdqu [rdx+16],xmm1
+end;
+
+function TUnit.OffsetToN: TTwin<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  psrldq xmm0,2      //remove the N-most row
+  pslldq xmm1,14     //Keep only the N-most row
+  movdqu [rdx],xmm0
+  movdqu [rdx+16],xmm1
+end;
+
+function TUnit.OffsetToNW: TQuad<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  psrldq xmm0,2      //remove the N-most row      --> S
+  pslldq xmm1,14     //Keep only the N-most row   --> N
+  movdqa xmm2,xmm0
+  movdqa xmm3,xmm1
+  psrlw  xmm0,1      //S -> SE      //3 rows - 1 column
+  psrlw  xmm1,1      //N -> NE      //1 row - 1 column
+  psllw  xmm2,15     //S -> SW      //3 rows - 15 columns = narrow SW strip
+  psllw  xmm3,15     //N -> NW      //1 row - 15 columns = single pixel
+  //NE, SE, SW, NW: T;
+  movdqu [rdx], xmm1
+  movdqu [rdx+16],xmm0
+  movdqu [rdx+32],xmm2
+  movdqu [rdx+48],xmm3
+end;
+
+function TUnit.OffsetToS: TTwin<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  pslldq xmm0,2      //remove the S-most row
+  psrldq xmm1,14     //Keep only the S-most row
+  movdqu [rdx],xmm0
+  movdqu [rdx+16],xmm1
+end;
+
+function TUnit.OffsetToSE: TQuad<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  pslldq xmm0,2      //remove the S-most row      --> N
+  psrldq xmm1,14     //Keep only the S-most row   --> S
+  movdqa xmm2,xmm0
+  movdqa xmm3,xmm1
+  psllw  xmm0,1      //N -> NW      //3 rows - 1 column
+  psllw  xmm1,1      //S -> SW      //1 row - 1 column
+  psrlw  xmm2,15     //N -> NE      //3 rows - 15 columns = narrow SW strip
+  psrlw  xmm3,15     //S -> SE      //1 row - 15 columns = single pixel
+  //NE, SE, SW, NW
+  movdqu [rdx], xmm2     //NE
+  movdqu [rdx+16],xmm3   //SE
+  movdqu [rdx+32],xmm1   //SW
+  movdqu [rdx+48],xmm0   //NW
+end;
+
+function TUnit.OffsetToW: TTwin<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  psrlw  xmm0,1      //Remove the west-most row
+  psllw  xmm1,15     //keep only the west-most row
+  movdqu [rdx],xmm0
+  movdqu [rdx+16],xmm1
 end;
 
 end.
