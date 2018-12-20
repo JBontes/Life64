@@ -28,6 +28,10 @@ object Form2: TForm2
     TabOrder = 0
     object TabSheet1: TTabSheet
       Caption = 'TabSheet1'
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object Label1: TLabel
         Left = 88
         Top = 104
@@ -526,6 +530,10 @@ object Form2: TForm2
     object TabSheet2: TTabSheet
       Caption = 'TabSheet2'
       ImageIndex = 1
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object SGSliceLayout: TStringGrid
         Left = 136
         Top = 180
@@ -601,6 +609,10 @@ object Form2: TForm2
     object TabSheet3: TTabSheet
       Caption = 'TabSheet3'
       ImageIndex = 2
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object StringGrid4: TStringGrid
         Left = 212
         Top = 143
@@ -647,6 +659,10 @@ object Form2: TForm2
     object TabSheet4: TTabSheet
       Caption = 'TabSheet4'
       ImageIndex = 3
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object BtnValidateN1E1LookupTable: TButton
         Left = 488
         Top = 184
@@ -798,6 +814,10 @@ object Form2: TForm2
     object TabSheet5: TTabSheet
       Caption = 'Unit Tests'
       ImageIndex = 4
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object Memo3: TMemo
         Left = 16
         Top = 24

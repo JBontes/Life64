@@ -5,8 +5,7 @@ uses
   TestInsight.DUnitx,
   Vcl.Forms,
   Unit2 in 'Unit2.pas' {Form2},
-  UnitTests in 'UnitTests.pas',
-  Universe in '..\..\LifeSearch\Life_Search\Delphi\Universe.pas';
+  UnitTests in 'UnitTests.pas';
 
 {$R *.res}
 
