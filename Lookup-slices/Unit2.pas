@@ -6680,6 +6680,8 @@ begin
   Block.p[5+0].q[1]:= Self.FKnownData[1];
   Block.p[5+4].q[0]:= Self.FKnownData[2];
   Block.p[5+4].q[1]:= Self.FKnownData[3];
+  Block.ToDoList.Activate(5);
+  Block.ToDoList.Activate(5+4);
   Block.GeneratePtoQ;
   //Now we have the result in Block.Q, but offset 1 pixel to the NorthWest (or was it SouthEast?)
   //Mask off the unknown bits

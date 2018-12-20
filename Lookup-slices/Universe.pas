@@ -8,7 +8,10 @@ uses
 type
 
   { TDiBits }
-
+  /// <summary>
+  ///  Encapsulation of a monochrome bitmap
+  ///  for displaying Life patterns on the screen
+  /// </summary>
   TDiBits = record
   public
     function Stride: integer; inline;
@@ -19,12 +22,15 @@ type
     width, height: cardinal;
   end;
 
+  /// <summary>
+  ///  One of the six directions supported by stagger stepping
+  /// </summary>
   TDirection = (dN,dW,dNW,dS,dE,dSE);
 
   { TUnit }
 
 const
-  BytesPerUnit = 16;
+  BytesPerUnit = 16;  //Units are made up of XMM words.
   MaxBytesPerUnit = BytesPerUnit -1;
   North = -8;
   South = -North;
@@ -35,18 +41,27 @@ const
   UnitsPerBlock = 4 {x} * 8 {y};   //32 units per block. or 64x64 pixels.
 
 type
-
+  /// <summary>
+  ///  Used by a Node of Leaf to track the activity at its borders.
+  ///  Because of stagger stepping we only need to track N,W,NW activity in the P stage
+  ///  and S,E,SE activity in the Q stage.
+  ///  This maps to the Horz, Vert and Corner.
+  /// </summary>
   TBorderMap = record
   private
-    Horz, Vert, Corn: integer;
+    FHorz, FVert, FCorn: integer;
   public
     procedure Activate(index, offset: integer);
     procedure ClearAll;
-    property Horizontal: integer read Horz;
-    property Vertical: integer read Vert;
-    property Corner: integer read Corn;
+    procedure ActivateAll;
+    property Horizontal: integer read FHorz;
+    property Vertical: integer read FVert;
+    property Corner: integer read FCorn;
   end;
 
+  /// <summary>
+  ///  A list of 64 items to process in a TNode.
+  /// </summary>
   TDoMap2 = record
   private
     a: Int64;
@@ -62,6 +77,9 @@ type
     function IsActiveP2(Direction: TDirection): boolean;
   end;
 
+  /// <summary>
+  ///  A list of 32 items to process in a TCellBlock
+  /// </summary>
   TDoMap = record
   {strict} private
     a: integer;
@@ -71,6 +89,7 @@ type
     function TestNext(previous: integer): integer;
     procedure ActivateAll;
     procedure Clear;
+    procedure ActivateMultiple(Mask: integer);
     procedure Activate(index: integer); overload;
     function Activate(index, Offset: integer): boolean; overload;
     procedure Deactivate(index: integer);
@@ -141,10 +160,15 @@ type
   TStatus = (AllAlive, AllActive, NS_Alive, NS_P2Plus, EW_Alive, EW_P2Plus, AllP2Plus, Corner_P2Plus);
   TGenerateStatus = set of TStatus;
 
-
+  /// <summary>
+  ///  An empty record used to overlap structures
+  /// </summary>
   TPlaceHolder = record
   end;
 
+  /// <summary>
+  ///  The data (P or Q) of a TCellBlock
+  /// </summary>
   TUnitStorage = array[0..UnitsPerBlock-1] of TUnit;
   TCellBlock = class;
   TNode = class;
@@ -152,7 +176,7 @@ type
 
   ///  The universe is stored as a 64-ary tree
   ///  The leafs hold the data in TCellBlocks (see below)
-  ///  TCellBlocks hold 128x128 pixels of data
+  ///  TCellBlocks hold 64x64 pixels of data
   ///  The nodes  hold 64 leafs in a 8x8 grid.
   TAbstractNode = class
   private
@@ -169,9 +193,10 @@ type
     FIndex: integer; //duplicate with x,y to prevent constant recalculations
     FParent: TNode;
     function GetNodeIndex(x, y: integer): integer;
+    function GetRect: TRect;
   protected
     function GetLifeCellBlock(x,y: integer; ForceCreation: boolean): TCellBlock; virtual; abstract;
-    function GetSubNode(index: integer): TAbstractNode; virtual; abstract;
+    function GetSubNode(index: integer): TAbstractNode; virtual;
     function GetIsLeaf: boolean; inline;
     function GoNorth(index: integer): TAbstractNode;
     function GoWest(index: integer): TAbstractNode;
@@ -204,7 +229,7 @@ type
   protected
     function GetLifeCellBlock(x,y: integer; ForceCreation: boolean): TCellBlock; override;
   public
-    constructor Create(X,Y, Index: integer; Parent: TNode); overload;
+    constructor Create(X,Y: integer; Parent: TNode); overload;
     procedure CoordinateNodeToBitmap(var x,y: integer; DisplayQ: boolean); inline;
     function GeneratePtoQ: TGenerateStatus; override;
     function GenerateQtoP: TGenerateStatus; override;
@@ -240,7 +265,7 @@ type
     function Get2x2(AUnit: pointer; FirstByte: integer): integer;
   protected
     function CellCount: integer;
-    function GetSubNode(index: integer): TAbstractNode;
+    function GetSubNode(index: integer): TAbstractNode; override;
     //procedure Difference(Generation: integer; var Diff: TUnitStorage);
     //function DifferenceCount(Generation: integer): integer;
   public
@@ -254,18 +279,22 @@ type
     ToDoList: TDoMap;                        //All the blocks that are to be processed.
     //First we do the subtractions and then we do the additions, to make sure that in case of conflict the
     //additions win out.
-    constructor Create(x,y: integer; Parent: TNode); overload;
   end;
 
+  /// <summary>
+  ///  TNode is a node in the 64-ary tree.
+  ///  It can hold either TCellBlocks in its SubNodes, in which case it is a Leaf node
+  ///  or more TNodes in its SubNodes.
+  /// </summary>
   TNode = class(TAbstractNode)
   public
     function GeneratePtoQ: TGenerateStatus; override;
     function GenerateQtoP: TGenerateStatus; override;
     procedure DisplayQ(const DrawSurface: TDIBits);
     procedure DisplayP(const DrawSurface: TDIBits);
-    constructor Create(X,Y, Index: integer; Parent: TNode); overload;
-    procedure SetPixel(x,y: integer; state: boolean = true);
-    function GetPixel(x,y: integer): boolean;
+    constructor Create(X,Y: integer; Parent: TNode);
+    procedure SetPixel(x,y: integer; state: boolean = true); override;
+    function GetPixel(x,y: integer): boolean; override;
   private
     ToDoList: TDoMap2;
     AddSubtract: TPlaceHolder;
@@ -274,10 +303,13 @@ type
     Border: TDoMap2;
     FSubNodes: array[0..63] of TAbstractNode;    //can be either PCellBlock or TNode.
     function GetIsRoot: boolean; inline;
-    function GetSubNode(x, y: integer): TAbstractNode; overload; inline;
+    function GetSubNode(x, y: integer): TAbstractNode; reintroduce; overload; inline;
     procedure SetSubNode(x,y: integer; const Value: TAbstractNode);
-    function NewSubNode(x, y, level: integer): TAbstractNode;
+    function NewSubNode(x, y: integer): TAbstractNode;
+  protected
+    function GetLifeCellBlock(x,y: integer; ForceCreation: boolean): TCellBlock; override;
   public
+    procedure Display(const DrawSurface: TDIBits; const DisplayRect: TRect); override;
     property SubNode[x,y: integer]: TAbstractNode read GetSubNode write SetSubNode;
     property IsRoot: boolean read GetIsRoot;
     property Pixel[x,y: integer]: boolean read GetPixel write SetPixel;
@@ -300,7 +332,8 @@ procedure ReverseBitsInAllBytes(ReverseMe: pointer);
 
 implementation
 
-
+uses
+  Math;
 
 { inline methods }
 
@@ -336,9 +369,20 @@ begin
     ///  x and y coordinates to get the pixel.
     ///  A node first shifts x and y down by 3+another 3 * level.
     ///  Then we take newx/newy and 7 to get the local x/y.
-    Shift:= 3 + 3 * Level;
+    Shift:= 3 + (3 * Level);
     Result:= ((x shr Shift) and 7) + ((y shr Shift) and 7) * 8;
   end;
+end;
+
+function TAbstractNode.GetRect: TRect;
+begin
+  var Width:= 1 shl (6+(3 * (FLevel + 1)));
+  Result:= Rect(FX, FY, FX+Width, FY+Width);
+end;
+
+function TAbstractNode.GetSubNode(index: integer): TAbstractNode;
+begin
+  Result:= Self;
 end;
 
 function TAbstractNode.goNorthWest(index: integer): TAbstractNode;
@@ -379,17 +423,38 @@ begin
   Result:= FSubNodes[GetNodeIndex(x,y)];
 end;
 
-constructor TNode.Create(X, Y, Index: integer; Parent: TNode);
+constructor TNode.Create(X, Y: integer; Parent: TNode);
 begin
   inherited Create;
-  FX:= X;
-  FY:= Y;
   FParent:= Parent;
   if (Assigned(Parent)) then begin
     FLevel:= Parent.Level - 1;
-    FIndex:= Index;
+    FIndex:= GetNodeIndex(FX,FY);
     {TODO -oJB -cTNode.Create : Query the neighbor nodes to see if they have activity}
   end;
+  FX:= X and not(((FLevel+1) * 8)-1);
+  FY:= Y and not(((FLevel+1) * 8)-1);
+end;
+
+procedure TNode.Display(const DrawSurface: TDIBits; const DisplayRect: TRect);
+
+  //Let's not call a WinAPI function just to overlap two rects.
+  function IntersectRect(const A,B: TRect): TRect;
+  begin
+    Result:= TRect.Empty;
+    var Left:= Max(A.Left, B.Left);
+    var Right:= Min(A.Right, B.Right);
+    var Top:= Max(A.Top, B.Top);
+    var Bottom:= Min(A.Bottom, B.Bottom);
+    if (Right >= Left) and (Bottom >= Top) then Result:= Rect(Left, Top, Right, Bottom);
+  end;
+
+begin
+  var Rect:= IntersectRect(DisplayRect, Self.GetRect);
+  if Rect.IsEmpty then exit
+  else for var i:= 0 to 63 do begin
+    FSubNodes[i].Display(DrawSurface, DisplayRect);
+  end; {for i}
 end;
 
 procedure TNode.DisplayP(const DrawSurface: TDIBits);
@@ -406,12 +471,12 @@ function TNode.GeneratePtoQ: TGenerateStatus;
 var
   i: integer;
   P: TAbstractNode;
-  NIndex, WIndex, NWIndex: integer;
   status: TGenerateStatus;
 begin
   FillChar(AddSubtract, SizeOf(TDoMap2)*2, 0);
   i:= ToDoList.Next(-1);
   while (i < 64) do begin
+    P:= FSubNodes[i];
     status:= P.GeneratePtoQ;
     //All of the cell.
     //if (AllActive in status) then begin
@@ -439,7 +504,6 @@ function TNode.GenerateQtoP: TGenerateStatus;
 var
   i: integer;
   Q: TAbstractNode;
-  Sindex, EIndex, SEIndex: integer;
   status: TGenerateStatus;
 begin
   FillChar(AddSubtract, SizeOf(TDoMap2)*2, 0);
@@ -468,16 +532,25 @@ begin
   Result:= FParent = nil;
 end;
 
+function TNode.GetLifeCellBlock(x, y: integer; ForceCreation: boolean): TCellBlock;
+begin
+  var Subnode:= GetSubNode(x,y);
+  if ForceCreation and (SubNode = nil) then begin
+    SubNode:= NewSubNode(x,y);
+  end;
+  Result:= SubNode.GetLifeCellBlock(x,y,ForceCreation);
+end;
+
 function TNode.GetPixel(x, y: integer): boolean;
 begin
   Result:= FSubNodes[GetNodeIndex(x,y)].GetPixel(x,y);
 end;
 
 
-function TNode.NewSubNode(x,y, level: integer): TAbstractNode;
+function TNode.NewSubNode(x,y: integer): TAbstractNode;
 begin
   if (Level = 0) then Result:= TCellBlock.Create(x,y,self)
-  else Result:= TNode.Create(x,y,level,Self);
+  else Result:= TNode.Create(x,y,Self);
   SubNode[x,y]:= Result;
 end;
 
@@ -574,16 +647,12 @@ begin
   y:= y * 128;
 end;
 
-constructor TCellBlock.Create(x, y: integer; Parent: TNode);
-begin
 
-end;
-
-constructor TCellBlock.Create(X, Y, Index: integer; Parent: TNode);
+constructor TCellBlock.Create(X, Y: integer; Parent: TNode);
 begin
   FX:= X;
   FY:= Y;
-  FIndex:= Index;
+  FIndex:= GetNodeIndex(x,y);
   FParent:= Parent;
   //Assert(Assigned(Parent), 'A Cellblock cannot have a nil parent');
 end;
@@ -620,6 +689,8 @@ var
   OffsetX, OffsetY, Offset: integer;
   x,y,i: integer;
 begin
+  X:= Self.FX;
+  Y:= Self.FY;
   if (IntersectRect(DrawRect, Rect(X*64, Y*64, (X+63)*64, (Y+63)*64))) then begin
     Stride:= DrawRect.width div 8; //64 pixels per CellBlock, 8 pixels per byte, thus 8 bytes per CellBlock
     // The TCellBlock is 64X by 64Y pixels. 4 units of 16 px horz and 8 units of 8 px vertically
@@ -646,9 +717,9 @@ var
   NIndex, WIndex, NWIndex: integer;
   status: TGenerateStatus;
 begin
-  //bN:= FParent.GoNorth(FIndex);
-  //bW:= FParent.GoWest(FIndex);
-  //bNW:= FParent.GoNorthWest(FIndex);
+  bN:= FParent.GoNorth(FIndex);
+  bW:= FParent.GoWest(FIndex);
+  bNW:= FParent.GoNorthWest(FIndex);
   FillChar(AddSubtract, SizeOf(TDoMap)*2, 0);
   i:= ToDoList.Next(-1);
   while (i < 32) do begin
@@ -749,7 +820,7 @@ end;
 
 function TCellBlock.GetSubNode(index: integer): TAbstractNode;
 begin
-
+  Result:= self;
 end;
 
 class constructor TCellBlock.Init;
@@ -902,24 +973,32 @@ begin
   //The offset is either positive (when south facing) or negative (when north facing).
   //The offset is never zero.
   case offset of
-    North: if index in [0..7] then Horz:= Horz or (1 shl index);
-    West: if ((index and 7) = 0) then Vert:= Vert or (1 shl (index shr 3));
-    South: if index in [120..127] then Horz:= Horz or (1 shl (index - 120));
-    East: if ((index and 7) = 7) then Vert:= Vert or (1 shl ((index -7) shr 3));
-    NorthWest: if index = 0 then Corn:= 1
-      else if (index in [1..7]) then Horz:= Horz or (1 shl (index -1))
-      else if ((index and 7) = 0) then Vert:= Vert or (1 shl ((index shr 3)-1));
-    SouthEast: if index = 127 then Corn:= 1
-      else if (index in [120..126]) then Horz:= Horz or (1 shl (index - 119))
-      else if ((index and 7) = 7) then Vert:= Vert or (1 shl ((index shr 3)+1));
+    North: if index in [0..7] then FHorz:= FHorz or (1 shl index);
+    West: if ((index and 7) = 0) then FVert:= FVert or (1 shl (index shr 3));
+    South: if index in [120..127] then FHorz:= FHorz or (1 shl (index - 120));
+    East: if ((index and 7) = 7) then FVert:= FVert or (1 shl ((index -7) shr 3));
+    NorthWest: if index = 0 then FCorn:= 1
+      else if (index in [1..7]) then FHorz:= FHorz or (1 shl (index -1))
+      else if ((index and 7) = 0) then FVert:= FVert or (1 shl ((index shr 3)-1));
+    SouthEast: if index = 127 then FCorn:= 1
+      else if (index in [120..126]) then FHorz:= FHorz or (1 shl (index - 119))
+      else if ((index and 7) = 7) then FVert:= FVert or (1 shl ((index shr 3)+1));
+    else Assert(false, 'TBorderMap.Activate: Offset out of range');
   end;
+end;
+
+procedure TBorderMap.ActivateAll;
+begin
+  FHorz:= -1;
+  FVert:= -1;
+  FCorn:= -1;
 end;
 
 procedure TBorderMap.ClearAll;
 begin
-  Horz:= 0;
-  Vert:= 0;
-  Corn:= 0;
+  FHorz:= 0;
+  FVert:= 0;
+  FCorn:= 0;
 end;
 
 { TDoMap2 }
@@ -930,8 +1009,6 @@ asm
 end;
 
 function TDoMap2.IsActive(direction: TDirection): boolean;
-var
-  Active: byte;
 begin
   case Direction of
     dN: Result:= (a and $000000000000000F) <> 0;
@@ -940,12 +1017,11 @@ begin
     dS: Result:= (a and $F000000000000000) <> 0;
     dE: Result:= (a and $8888888888888888) <> 0;
     dSE: Result:=(a and $8000000000000000) <> 0;
+    else Result:= true;
   end;
 end;
 
 function TDoMap2.IsActiveP2(direction: TDirection): boolean;
-var
-  Active: byte;
 begin
   case Direction of
     dN: Result:= (a and $00000000000000FF) <> 0;
@@ -954,6 +1030,7 @@ begin
     dS: Result:= (a and $FF00000000000000) <> 0;
     dE: Result:= (a and $CCCCCCCCCCCCCCCC) <> 0;
     dSE: Result:=(a and $CC00000000000000) <> 0;
+    else Result:= true;
   end;
 end;
 
@@ -1133,6 +1210,11 @@ asm
   mov dword ptr [rcx],-1
 end;
 
+procedure TDoMap.ActivateMultiple(Mask: integer);
+begin
+  Self.a:= Mask;
+end;
+
 procedure TDoMap.Clear;
 asm
   mov dword ptr [rcx],0
@@ -1149,8 +1231,6 @@ asm
 end;
 
 function TDoMap.IsActive(direction: TDirection): boolean;
-var
-  Active: byte;
 begin
   case Direction of
     dN: Result:= (a and $0000000F) <> 0;
@@ -1159,12 +1239,11 @@ begin
     dS: Result:= (a and $F0000000) <> 0;
     dE: Result:= (a and $88888888) <> 0;
     dSE: Result:=(a and $80000000) <> 0;
+    else Result:= true;
   end;
 end;
 
 function TDoMap.IsActiveP2(direction: TDirection): boolean;
-var
-  Active: byte;
 begin
   case Direction of
     dN: Result:= (a and $000000FF) <> 0;
@@ -1173,6 +1252,7 @@ begin
     dS: Result:= (a and $FF000000) <> 0;
     dE: Result:= (a and $CCCCCCCC) <> 0;
     dSE: Result:=(a and $CC000000) <> 0;
+    else Result:= true;
   end;
 end;
 
