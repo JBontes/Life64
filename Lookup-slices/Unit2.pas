@@ -750,8 +750,8 @@ type
     public
       constructor Create(Grid: PGrid);
       function MoveNext: boolean; inline;
-      function GetCurrent: TSlice; inline;
-      property Current: TSlice read GetCurrent;
+      function GetCurrent: PSlice; inline;
+      property Current: PSlice read GetCurrent;
     end;
   private
     /// <summary>
@@ -805,6 +805,7 @@ type
     /// </summary>
     constructor Create(SizeX, SizeY: integer); overload;
     constructor Create(const Template: TGrid); overload;
+    procedure Overwrite(var GridToBeOverwritten: TGrid);
     function Clone: TGrid;
     /// <summary>
     ///  Or two slices together for every slice in the grid.
@@ -1054,6 +1055,7 @@ type
     ProgressBar1: TProgressBar;
     BtnCreateLookup5x5to3x3UsingSpeculativeExploration: TButton;
     BtnInitWithGoE2: TButton;
+    Button1: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1100,6 +1102,7 @@ type
     procedure StringGrid5DblClick(Sender: TObject);
     procedure BtnInitWithGoE2Click(Sender: TObject);
     procedure BtnRunSingleTestClick(Sender: TObject);
+    procedure Button1Click(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -2142,7 +2145,7 @@ end;
 //No longer needed
 procedure TForm2.BtnRotateCounterClick(Sender: TObject);
 var
-  Slice: TSlice;
+  Slice: PSlice;
 begin
   GetCounterLayout;
   for Slice in MySlices do begin
@@ -3735,6 +3738,59 @@ end;
 
 //deprecated
 //old test code, no longer relevant, because we don't do tensor transposes anymore.
+procedure TForm2.Button1Click(Sender: TObject);
+begin
+  // Read the lookup table
+  // if not FileOpenDialog1.Execute then Exit;
+  // FS:= TFileStream.Create(FileOpenDialog1.FileName, fmOpenRead);
+  // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
+  // FS.Read64(TBytes(LookupTable), 0, FS.Size);
+  // FS.Free;
+  var MySlices:= TGrid.Create(16,16);
+  // Get the slice data from the grid, by looking it up in the lookup table
+  for var x:= 0 to 15 do begin
+    for var y:= 0 to 15 do begin
+      MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x, y, LookupTable, oCenter);
+      StringGrid3.Cells[x, y]:= '';
+    end;
+  end;
+  //Start the timer
+  var Timer:= TStopWatch.StartNew;
+  var Changes: TSliverChanges;
+  repeat
+    Changes:= MySlices.DoASliverRun;
+  until (Changes.IsInvalid) or (Changes.IsUnchanged);
+  //Find the slice with the smallest statecount
+  var Min:= 513; //make sure we always find something
+  var MinSlice: PSlice:= nil;
+  for var Slice in MySlices do begin
+    if Slice.PopCount < Min then begin
+      MinSlice:= Slice;
+      Min:= Slice.PopCount;
+    end;
+  end;
+  var ValidStates:= min;
+  if Min > 0 then begin //We have to do some exploring
+    var Index:= -1;
+    var Clone:= MySlices.Clone;
+    for var i:= 1 to Min do begin
+      //Slice points to MySlices, change MySlices and use the clone to put things back later
+      Index:= MinSlice.NextSetBit(Index);
+      MinSlice.ForceSingleBit(Index);
+      repeat
+        Changes:= MySlices.DoASliverRun;
+      until (Changes.IsInvalid) or (Changes.IsUnchanged);
+      if Changes.IsUnchanged then break; //We have a valid ancestor, stop the search
+      Dec(ValidStates);
+      Clone.Overwrite(MySlices); //Restore MySlices, do not distrub the MinSlice pointer.
+    end; {for i}
+  end;
+  Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  if ValidStates = 0 then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
+  else Memo1.Lines.Add('SAT - Pattern has a solution');
+end;
+
 procedure TForm2.Button8Click(Sender: TObject);
 var
   Ordering: TArray<integer>;
@@ -3839,16 +3895,16 @@ end;
 //Hard GoE
 procedure TForm2.InitWithGoE;
 const
-  Pattern: string = '?-X---X-??,' +
-                    '?X-X-X-XX-,' +
-                    '-X---XX--X,' +
-                    'X-X-----X-,' +
-                    '-XX-XX----,' +
-                    '----XX-XX-,' +
-                    '-X-----X-X,' +
-                    'X--XX---X-,' +
-                    '-XX-X-X-X?,' +
-                    '??-X---X-?.';
+  Pattern: string = '?X-XXX-X??,' +
+                    '?-X-X-X--X,' +
+                    'X-XXX--XX-,' +
+                    '-X-XXXXX-X,' +
+                    'X--X--XXXX,' +
+                    'XXXX--X--X,' +
+                    'X-XXXXX-X-,' +
+                    '-XX--XXX-X,' +
+                    'X--X-X-X-?,' +
+                    '??X-XXX-X?.';
 begin
   InitWithPattern(Pattern);
 end;
@@ -6283,6 +6339,12 @@ begin
   Move(Self.FData[0], Result.FData[0], Count * SizeOf(TSlice));
 end;
 
+procedure TGrid.Overwrite(var GridToBeOverwritten: TGrid);
+begin
+  var Count:= FSizeX * FSizeY;
+  Move(Self.FData[0], GridToBeOverwritten.FData[0], Count * SizeOf(TSlice));
+end;
+
 constructor TGrid.Create(const Template: TGrid);
 begin
   Self:= TGrid.Create(Template.SizeX, Template.SizeY);
@@ -6584,15 +6646,15 @@ begin
   FMax:= Length(Grid^.FData);
 end;
 
-function TGrid.TGridEnumerator.GetCurrent: TSlice;
+function TGrid.TGridEnumerator.GetCurrent: PSlice;
 begin
-  Result:= FParent^.FData[FIndex];
+  Result:= @FParent^.FData[FIndex];
 end;
 
 function TGrid.TGridEnumerator.MoveNext: boolean;
 begin
   Inc(FIndex);
-  Result:= (FIndex = FMax);
+  Result:= (FIndex < FMax);
 end;
 
 { TSliceHelper }
