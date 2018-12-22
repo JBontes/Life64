@@ -9,7 +9,7 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.Grids, Vcl.ComCtrls,
   JvComponentBase, JvAppStorage, JvAppRegistryStorage, System.Win.TaskbarCore,
   Vcl.Taskbar, System.Actions, Vcl.ActnList, Vcl.PlatformDefaultStyleActnCtrls,
-  Vcl.ActnMan;
+  Vcl.ActnMan, Universe;
 
 const
   cStanding = true; //deprecated;
@@ -684,9 +684,6 @@ type
   ///  and XOR the two. If the result = 0, All good, if not then that past is invalid.
   /// </summary>
   TGridBitmap = record
-  private
-    FKnownData: array[0..3] of Uint64;
-    FUnknownData: array[0..3] of Uint64;
   public
     /// <summary>
     ///  PasteFragments inserts a 3x3 snippet with known and unknown data into the bitmap
@@ -714,6 +711,13 @@ type
     function UnknownFuture: TGridBitmap;
 
     class function Empty: TGridBitmap; static;
+    function TestUnknownFuture: boolean;
+  private
+    case boolean of
+      true:  (FKnownData: array[0..3] of Uint64;
+              FUnknownData: array[0..3] of Uint64);
+      false: (FKnownUnit: array[0..1] of TUnit;
+              FUnknownUnit: array[0..1] of TUnit);
   end;
 
 
@@ -1145,7 +1149,6 @@ uses{$IFDEF GpProfile U} GpProf, {$ENDIF GpProfile U}
   System.UITypes,
   System.Diagnostics,
   HIResStopWatch,
-  Universe,
   TestInsight.Client, TestInsight.DUnitX, UnitTests, Math;
 
 {$R *.dfm}
@@ -6661,14 +6664,72 @@ begin
   end; {case}
 end;
 
+function TGridBitmap.TestUnknownFuture: boolean;
+begin
+  FillChar(Self, SizeOf(Self), $FF);
+  var Test:= Self.UnknownFuture;
+  Result:= (Test.FUnknownData[0] and Test.FUnknownData[1] and Test.FUnknownData[2] and Test.FUnknownData[3]) = -1;
+end;
+
 function TGridBitmap.UnknownFuture: TGridBitmap;
-asm
+begin
   //RCX = Self
   //Self:
   //    FKnownData: array[0..3] of Uint64;
   //    FUnknownData: array[0..3] of Uint64; #Every 16 bits holds a row.
-  //movdqu
+  var UnknownN:= FUnknownUnit[0];
+  var UnknownS:= FUnknownData[1];
+  //Offset to each of the 8 compass directions
+  var UNN:= UnknownN.OffsetToN;
+  var UNNE:= UnknownN.OffsetToNE;
+  var UNE:= UnknownN.OffsetToE;
+  var UNSE:= UnknownN.OffsetToSE;
+  var UNS:= UnknownN.OffsetToS;
+  var UNSW:= UnknownN.OffsetToSW;
+  var UNW:= UnknownN.OffsetToW;
+  var UNNW:= UnknownN.OffsetToNW;
 
+  var USN:= UnknownS.OffsetToN;
+  var USNE:= UnknownS.OffsetToNE;
+  var USE:= UnknownS.OffsetToE;
+  var USSE:= UnknownS.OffsetToSE;
+  var USS:= UnknownS.OffsetToS;
+  var USSW:= UnknownS.OffsetToSW;
+  var USW:= UnknownS.OffsetToW;
+  var USNW:= UnknownS.OffsetToNW;
+
+  //Combine the two N offsets, we only keep the S parts
+  UNN.A:= UNN.B xor USN.A;             //Xor is used to aid testing that no invalid overlaps occur.
+  UNN.B:= USN.B;
+  //Combine the two S offset, we only keep the N parts
+  //UNS.A:= UNS.A
+  UNS.B:= UNS.B xor USS.A;
+  //For the E shift, we only keep the West part
+  //UNE.A:= UNE.A
+  UNE.B:= USE.A;
+  //For the W shift, we keep only the East part
+  //UNW.A:= UNW.A;
+  UNW.B:= USW.A;
+  //For the NW shift, we keep only the SE part
+  UNNW.NE:= UNNW.SE xor USNW.NE;
+  UNNW.SE:= USNW.SE;
+  //for the NE shift, we keep only the SW part
+  UNNE.NW:= UNNE.SW xor USNE.NW;
+  UNNE.SW:= USNE.SW;
+  //for the SE shift, we keep only the NW part
+  //UNSE.NW:= UNSE.NW
+  UNSE.SW:= UNSE.SW xor USSE.NW;
+  //for the SW shift, we keep only the NE part
+  //UNSW.NE:= UNSW.NE;
+  UNSW.SE:= UNSW.SE xor USSW.NE;
+  //Now add everything together
+  ////////////////////////////////////  N        S        E        W
+  Result.FUnknownUnit[0]:= UNN.A or UNS.a or UNE.a or UNW.a or UNNW.NE or UNNE.NW or UNSE.NW or UNSW.NE;
+  Result.FUnknownUnit[0]:= UNN.b or UNS.b or UNE.b or UNW.b or UNNW.SE or UNNE.SW or UNSE.SW or UNSW.SE;
+  Result.FKnownData[0]:= Self.FKnownData[0];
+  Result.FKnownData[1]:= Self.FKnownData[1];
+  Result.FKnownData[2]:= Self.FKnownData[2];
+  Result.FKnownData[3]:= Self.FKnownData[3];
 end;
 
 function TGridBitmap.Validate(const Reference: TGridBitmap): boolean;
@@ -6688,12 +6749,12 @@ begin
   var QuadN:= Block.q[5+0].OffsetToNW; //I may need to change this to OffsetToSE if I guessed wrong
   var QuadS:= Block.q[5+4].OffsetToNW;
   //Reduce the 16x16 pixel block to 15x15
-  var N:= QuadN.SE or QuadS.NE;
+  var N:= QuadN.SE xor QuadS.NE;
   var S:= QuadS.SE;
   //Mask off the unknown bits
-  //First we need to move the unknown bits 1 pixel to the south, north, east and west.
-  var UnknownN:= TUnit((@FUnknownData[0])^);
-  var UnknownS:= TUnit((@FUnknownData[2])^);
+  //First we need to move the unknown bits 1 pixel to all 8 compass directions
+
+
 
 
   //This extends the unknown area to its future lightcone

@@ -98,7 +98,7 @@ type
     function IsActiveP2(direction: TDirection): boolean;
   end;
 
-  TTwin<T> = record
+  TDual<T> = record
   public
     A,B: T;
   end;
@@ -119,11 +119,14 @@ type
     function GetPixel(x, y: integer): boolean;
     function OffsetToNW: TQuad<TUnit>;
     function OffsetToSE: TQuad<TUnit>;
-    function OffsetToN: TTwin<TUnit>;
-    function OffsetToS: TTwin<TUnit>;
-    function OffsetToE: TTwin<TUnit>;
-    function OffsetToW: TTwin<TUnit>;
+    function OffsetToSW: TQuad<TUnit>;
+    function OffsetToNE: TQuad<TUnit>;
+    function OffsetToN: TDual<TUnit>;
+    function OffsetToS: TDual<TUnit>;
+    function OffsetToE: TDual<TUnit>;
+    function OffsetToW: TDual<TUnit>;
     class operator BitwiseOr(const A,B: TUnit): TUnit;
+    class operator BitwiseXor(const A,B: TUnit): TUnit;
     case integer of
       1: (b: array[0..MaxBytesPerUnit] of byte);
       2: (w: array[0..(BytesPerUnit div 2)-1] of word);
@@ -474,12 +477,12 @@ end;
 
 procedure TNode.DisplayP(const DrawSurface: TDIBits);
 begin
-
+  //TODO 5 -oJohan -cEmpty Code Block: TNode.DisplayP (begin/end in procedure)
 end;
 
 procedure TNode.DisplayQ(const DrawSurface: TDIBits);
 begin
-
+  //TODO 5 -oJohan -cEmpty Code Block: TNode.DisplayQ (begin/end in procedure)
 end;
 
 function TNode.GeneratePtoQ: TGenerateStatus;
@@ -1321,13 +1324,16 @@ asm
 end;
 
 { TUnit }
-
-
-
 class operator TUnit.BitwiseOr(const A, B: TUnit): TUnit;
 begin
   Result.q[0]:= A.q[0] or B.q[0];
   Result.q[1]:= A.q[1] or B.q[1];
+end;
+
+class operator TUnit.BitwiseXor(const A, B: TUnit): TUnit;
+begin
+  Result.q[0]:= A.q[0] xor B.q[0];
+  Result.q[1]:= A.q[1] xor B.q[1];
 end;
 
 procedure TUnit.Display(const BitmapStart: pointer; const LineOffset: integer);
@@ -1380,7 +1386,7 @@ begin
   Result:= w[y] and Mask <> 0;
 end;
 
-function TUnit.OffsetToE: TTwin<TUnit>;
+function TUnit.OffsetToE: TDual<TUnit>;
 //RCX = @self
 //RDX = @result
 asm
@@ -1392,7 +1398,7 @@ asm
   movdqu [rdx+16],xmm1
 end;
 
-function TUnit.OffsetToN: TTwin<TUnit>;
+function TUnit.OffsetToN: TDual<TUnit>;
 //RCX = @self
 //RDX = @result
 asm
@@ -1402,6 +1408,27 @@ asm
   pslldq xmm1,14     //Keep only the N-most row
   movdqu [rdx],xmm0
   movdqu [rdx+16],xmm1
+end;
+
+function TUnit.OffsetToNE: TQuad<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  psrldq xmm0,2      //remove the N-most row      --> S
+  pslldq xmm1,14     //Keep only the N-most row   --> N
+  movdqa xmm2,xmm0
+  movdqa xmm3,xmm1
+  psllw  xmm0,1      //S -> SW      //3 rows - 1 column
+  psllw  xmm1,1      //N -> NW      //1 row - 1 column
+  psrlw  xmm2,15     //S -> SE      //3 rows - 15 columns = narrow SE strip
+  psrlw  xmm3,15     //N -> NE      //1 row - 15 columns = single pixel
+  //NE, SE, SW, NW: T;
+  movdqu [rdx], xmm3
+  movdqu [rdx+16],xmm2
+  movdqu [rdx+32],xmm0
+  movdqu [rdx+48],xmm1
 end;
 
 function TUnit.OffsetToNW: TQuad<TUnit>;
@@ -1425,7 +1452,7 @@ asm
   movdqu [rdx+48],xmm3
 end;
 
-function TUnit.OffsetToS: TTwin<TUnit>;
+function TUnit.OffsetToS: TDual<TUnit>;
 //RCX = @self
 //RDX = @result
 asm
@@ -1458,7 +1485,29 @@ asm
   movdqu [rdx+48],xmm0   //NW
 end;
 
-function TUnit.OffsetToW: TTwin<TUnit>;
+function TUnit.OffsetToSW: TQuad<TUnit>;
+//RCX = @self
+//RDX = @result
+asm
+  movdqu xmm0,[rcx]
+  movdqa xmm1,xmm0
+  pslldq xmm0,2      //remove the S-most row      --> N
+  psrldq xmm1,14     //Keep only the S-most row   --> S
+  movdqa xmm2,xmm0
+  movdqa xmm3,xmm1
+  psrlw  xmm0,1      //N -> NE      //3 rows - 1 column
+  psrlw  xmm1,1      //S -> SE      //1 row - 1 column
+  psllw  xmm2,15     //N -> NW      //3 rows - 15 columns = narrow NW strip
+  psllw  xmm3,15     //S -> SW      //1 row - 15 columns = single pixel
+  //NE, SE, SW, NW: T;
+  movdqu [rdx], xmm0
+  movdqu [rdx+16],xmm1
+  movdqu [rdx+32],xmm3
+  movdqu [rdx+48],xmm2
+end;
+
+
+function TUnit.OffsetToW: TDual<TUnit>;
 //RCX = @self
 //RDX = @result
 asm
