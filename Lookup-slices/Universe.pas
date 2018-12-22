@@ -114,6 +114,7 @@ type
   ///  It matches a xmm word inside the CPU
   /// </summary>
   TUnit = record
+  public
     procedure Display(const BitmapStart: pointer; const LineOffset: integer);
     procedure SetPixel(x,y: integer; value: boolean = true);
     function GetPixel(x, y: integer): boolean;
@@ -127,6 +128,8 @@ type
     function OffsetToW: TDual<TUnit>;
     class operator BitwiseOr(const A,B: TUnit): TUnit;
     class operator BitwiseXor(const A,B: TUnit): TUnit;
+    class operator BitwiseAnd(const A,B: TUnit): TUnit;
+    class operator LogicalNot(const A: TUnit): TUnit;
     case integer of
       1: (b: array[0..MaxBytesPerUnit] of byte);
       2: (w: array[0..(BytesPerUnit div 2)-1] of word);
@@ -1324,6 +1327,12 @@ asm
 end;
 
 { TUnit }
+class operator TUnit.BitwiseAnd(const A, B: TUnit): TUnit;
+begin
+  Result.q[0]:= A.q[0] and B.q[0];
+  Result.q[1]:= A.q[1] and B.q[1];
+end;
+
 class operator TUnit.BitwiseOr(const A, B: TUnit): TUnit;
 begin
   Result.q[0]:= A.q[0] or B.q[0];
@@ -1384,6 +1393,12 @@ var
 begin
   Mask:= 1 shl x;
   Result:= w[y] and Mask <> 0;
+end;
+
+class operator TUnit.LogicalNot(const A: TUnit): TUnit;
+begin
+  Result.q[0]:= not(A.q[0]);
+  Result.q[1]:= not(A.q[0]);
 end;
 
 function TUnit.OffsetToE: TDual<TUnit>;

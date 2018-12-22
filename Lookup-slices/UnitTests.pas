@@ -12,7 +12,9 @@ type
 
   [TestFixture]
   TSliceTests = class(TObject)
+  //By default only unit tests that are published are run.
   private
+    //Inactive unit tests
     class procedure TestSliceNextBitSet; static;
     class procedure TimeSlowNSFolding; static;
     class procedure TimeFastNSFolding; static;
@@ -27,6 +29,7 @@ type
     class procedure FoldRemaining; static;
     class procedure TestTMaskBitsCreate; static;
   published
+    //Active unit tests.
     procedure DoesTestingStart;
   private
 //    class procedure TimeSlowNSFolding; static;
@@ -50,6 +53,7 @@ type
     class procedure TimeFastNorth; static;
     class procedure TimeSlowNorth; static;
   published
+    class procedure ValidateUnknownFuture; static;
     class procedure ValidateFastEWFolding; static;
     class procedure ValidateFastNSFolding; static;
 
@@ -907,6 +911,14 @@ begin
     end;
     Assert.AreEqual(StatusA,StatusB,'TSliver.NSFast produces incorrect status');
   end;
+end;
+
+class procedure TSliceTests.ValidateUnknownFuture;
+begin
+  var Ist:= TGridBitmap.Full;
+  var Soll:= TGridBitmap.Full;
+  Ist.UnknownFuture;
+  Assert.AreEqual(Soll, Ist);
 end;
 
 class procedure TSliceTests.ValidateFastEWFolding;

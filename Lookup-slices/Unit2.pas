@@ -659,6 +659,17 @@ type
     property y: integer read FData.y write FData.y;
   end;
 
+  TGridData = record
+  public
+    class operator BitwiseAnd(const A, B: TGridData): TGridData;
+    class operator BitwiseXor(const A, B: TGridData): TGridData;
+    class operator BitwiseOr(const A, B: TGridData): TGridData;
+    class operator LogicalNot(const A: TGridData): TGridData;
+    function IsEmpty: boolean;
+  private
+    FData: array[0..3] of Uint64;
+  end;
+
   {TODO -oJB -cTGridBitmap : Not yet implemented}
   /// <summary>
   ///  A TGridBitmap is a 16x16 pixel single bit per pixel sub-bitmap
@@ -711,13 +722,17 @@ type
     function UnknownFuture: TGridBitmap;
 
     class function Empty: TGridBitmap; static;
+    class function Full: TGridBitmap; static;
+    procedure MaskOffUnknown;
     function TestUnknownFuture: boolean;
   private
-    case boolean of
-      true:  (FKnownData: array[0..3] of Uint64;
-              FUnknownData: array[0..3] of Uint64);
-      false: (FKnownUnit: array[0..1] of TUnit;
-              FUnknownUnit: array[0..1] of TUnit);
+    case integer of
+      8:  (FKnownData: array[0..3] of Uint64;
+           FUnknownData: array[0..3] of Uint64);
+      16: (FKnownUnit: array[0..1] of TUnit;
+           FUnknownUnit: array[0..1] of TUnit);
+      32: (FKnown: TGridData;
+           FUnknown: TGridData);
   end;
 
 
@@ -6601,6 +6616,17 @@ begin
   FillChar(Result, SizeOf(Result), #0);
 end;
 
+class function TGridBitmap.Full: TGridBitmap;
+begin
+  FillChar(Result, SizeOf(Result), $FF);
+end;
+
+procedure TGridBitmap.MaskOffUnknown;
+begin
+  FKnownUnit[0]:= FKnownUnit[0] and not(FUnknownUnit[0]);
+  FKnownUnit[1]:= FKnownUnit[1] and not(FUnknownUnit[1]);
+end;
+
 function TGridBitmap.PasteFragment(p: TPoint; KnownFragment, UnknownFragment: Uint64): TOutOfBounds;
 const
   Mask: array[-2..2,-2..2] of Uint64 =
@@ -6678,7 +6704,7 @@ begin
   //    FKnownData: array[0..3] of Uint64;
   //    FUnknownData: array[0..3] of Uint64; #Every 16 bits holds a row.
   var UnknownN:= FUnknownUnit[0];
-  var UnknownS:= FUnknownData[1];
+  var UnknownS:= FUnknownUnit[1];
   //Offset to each of the 8 compass directions
   var UNN:= UnknownN.OffsetToN;
   var UNNE:= UnknownN.OffsetToNE;
@@ -6749,19 +6775,17 @@ begin
   var QuadN:= Block.q[5+0].OffsetToNW; //I may need to change this to OffsetToSE if I guessed wrong
   var QuadS:= Block.q[5+4].OffsetToNW;
   //Reduce the 16x16 pixel block to 15x15
-  var N:= QuadN.SE xor QuadS.NE;
-  var S:= QuadS.SE;
-  //Mask off the unknown bits
   //First we need to move the unknown bits 1 pixel to all 8 compass directions
+  var Future:= Self.UnknownFuture;
+  //Put the known future together with the unknown future
+  Future.FKnownUnit[0]:= QuadN.SE xor QuadS.NE;
+  Future.FKnownUnit[1]:= QuadS.SE;
 
-
-
-
-  //This extends the unknown area to its future lightcone
-  //Then we compensate for the staggerstepping by GeneratePtoQ
-  //Xor it with the norm pattern
-  //Mask with the unknown bits
-  //If there are still non-zero bits, then the pattern does not match and we return false.
+  //Get the difference between the norm and the future
+  Future.FKnown:= Future.FKnown xor Reference.FKnown;
+  Future.MaskOffUnknown;
+  //If the result <> 0, then we have a problem.
+  Result:= Future.FKnown.IsEmpty;
 end;
 
 { TOutOfBounds }
@@ -6782,6 +6806,44 @@ end;
 class operator TOutOfBounds.Implicit(a: TOutOfBounds): TPoint;
 begin
   Result:= a.FData;
+end;
+
+{ TGridData }
+
+class operator TGridData.BitwiseAnd(const A, B: TGridData): TGridData;
+begin
+  for var i:= 0 to 3 do begin
+    Result.FData[i]:= A.FData[i] and B.FData[i];
+  end;
+end;
+
+class operator TGridData.BitwiseOr(const A, B: TGridData): TGridData;
+begin
+  for var i:= 0 to 3 do begin
+    Result.FData[i]:= A.FData[i] or B.FData[i];
+  end;
+end;
+
+class operator TGridData.BitwiseXor(const A, B: TGridData): TGridData;
+begin
+  for var i:= 0 to 3 do begin
+    Result.FData[i]:= A.FData[i] xor B.FData[i];
+  end;
+end;
+
+function TGridData.IsEmpty: boolean;
+begin
+  for var i:= 0 to 3 do begin
+    if FData[i] <> 0 then Exit(false);
+  end;
+  Result:= true;
+end;
+
+class operator TGridData.LogicalNot(const A: TGridData): TGridData;
+begin
+  for var i:= 0 to 3 do begin
+    Result.FData[i]:= not(A.FData[i]);
+  end;
 end;
 
 end.
