@@ -523,7 +523,7 @@ object Form2: TForm2
         OnClick = BtnInitWithGoE2Click
       end
       object Button1: TButton
-        Left = 7
+        Left = 2
         Top = 105
         Width = 170
         Height = 25
@@ -842,6 +842,15 @@ object Form2: TForm2
         Caption = 'Run a single test-If needed'
         TabOrder = 3
         OnClick = BtnRunSingleTestClick
+      end
+      object BtnValidateCompressedLookupTable: TButton
+        Left = 528
+        Top = 368
+        Width = 153
+        Height = 25
+        Caption = 'Validate compressed lookup'
+        TabOrder = 4
+        OnClick = BtnValidateCompressedLookupTableClick
       end
     end
   end
