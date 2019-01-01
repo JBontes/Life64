@@ -144,6 +144,7 @@ object Form2: TForm2
         FixedRows = 0
         ParentCtl3D = False
         TabOrder = 3
+        OnClick = StringGrid1DblClick
         OnDblClick = StringGrid1DblClick
         OnDrawCell = StringGrid2DrawCell
         OnMouseUp = StringGrid1MouseUp
