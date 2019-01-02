@@ -31,41 +31,40 @@ type
     class operator NotEqual(const a, b: TSliver): boolean;
     class operator Implicit(const a: Uint64): TSliver;
     function IsValid: boolean;
-    function PopCount: integer;
   private
     case integer of
       8: (Data8: int64);
+      4: (Data4: array [0 .. 1] of uint32);
+      2: (Data2: array [0 .. 3] of word);
       1: (bytes: array [0 .. 7] of byte);
   end;
 
   /// <summary>
   ///  When we create a sliver, it is because we want to reduce
   ///  the number of allowed states.
-  ///  A sliver is created from two slices and is then used to transfer any changes
-  ///  picked up in it back to those slices.
-  ///
   ///  At this point we might as well track if there are any changes
   ///  and if we have stumbled on a invalid slice (zero allowed states).
   ///  rather than performing a seperate test.
-  ///
-  ///  As a cool side effect we can easily see which of the two slices will change
   /// </summary>
   TSliverChanges = record
   strict private type
-    TSliverState = (scNEChanged=0, scSWChanged=1, scInvalid=2);
-    TSliverStates = set of TSliverState;
+    TSliverState = (scUnchanged, scChanged, scInvalid);
   public
+    /// <summary>
+    ///  Return true if changed or invalid, false if unchanged.
+    /// </summary>
+    class operator explicit(a: TSliverChanges): boolean; // Changed/unchanged (note that here ssZero = ssChanged)
     /// <summary>
     ///  Return TSliverChanges.Unchanged if false, TSliverChanges.Changed if true.
     /// </summary>
-    //class operator Implicit(a: boolean): TSliverChanges;
+    class operator Implicit(a: boolean): TSliverChanges;
     /// <summary>
     ///  a=Unchanged or true => a:= Changed
     ///  a=Unchanged or false => a:= Unchanged
     ///  a=Changed or whatever => a:= changed
     ///  a=invalid or whatever => a:= Invalid
     /// </summary>
-    //class operator LogicalOr(const a: TSliverChanges; const b: boolean): TSliverChanges;
+    class operator LogicalOr(const a: TSliverChanges; const b: boolean): TSliverChanges;
     /// <summary>
     ///  If b is invalid then add invalid to the result.
     ///  otherwise return a
@@ -75,7 +74,7 @@ type
     ///  Result:= a or b (I did not use OR, because to avoid triggering an implicit
     ///  conversion of a TSliverChanges into a boolean)
     /// </summary>
-    class operator BitwiseOr(const a, b: TSliverChanges): TSliverChanges;
+    class operator Add(const a, b: TSliverChanges): TSliverChanges;
     /// <summary>
     ///  Used to check if we should stop overlapping slices.
     /// </summary>
@@ -94,8 +93,6 @@ type
     /// </summary>
     class function Changed: TSliverChanges; static; inline;
 
-    class function Changes(const NE, SW, Sliver: TSliver): TSliverChanges; static;
-
     function IsValid: boolean; inline;
     /// <summary>
     ///  Result:= (Self = scChanged)
@@ -113,14 +110,10 @@ type
     ///  Result:= (Self = scUnChanged)
     /// </summary>
     function IsUnchanged: boolean; inline;
-    function NorthChanged: boolean; inline;
-    function SouthChanged: boolean; inline;
-    function EastChanged: boolean; inline;
-    function WestChanged: boolean; inline;
   private
     case integer of
-      1: (Data: TSliverStates);
-      2: (Raw: byte); //0 = unchanged, 1=NE, 2=SW, 3=All, >=4=Invalid
+      1: (AsBoolean: boolean); //make sure to always load this with a pure boolean 1=true, 0 = false.
+      2: (AsByte: byte);
   end;
 
   /// <summary>
@@ -375,6 +368,30 @@ type
     /// </summary>
     function South: TSlice;
     /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a North and then an East
+    ///  No longer used, because it is not needed
+    /// </summary>
+    function NorthEast: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a North and then a West
+    ///  No longer used, because it is not needed
+    /// </summary>
+    function NorthWest: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a South and then a West
+    ///  No longer used, because it is not needed
+    /// </summary>
+    function SouthWest: TSlice;
+    /// <summary>
+    ///  Take a mini-sliver (2x2) and expand it into a slice
+    ///  Basically performs a South and then an East
+    ///  No longer used, because it is not needed
+    /// </summary>
+    function SouthEast: TSlice;
+    /// <summary>
     ///  Take two neighboring slices N and S.
     ///  Transform N -> SliverS, transform S -> SliverN.
     ///  Now SliverS and SliverN fully overlap, AND them and return the result.
@@ -406,8 +423,44 @@ type
     ///  Changed = scInvalid if result = 0.
     /// </summary>
     class function EW(const East, West: TSlice; out Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices SE and NW.
+    ///  Transform SE -> Mini-SliverNW, transform NW -> mini-SliverSE.
+    ///  Now Mini-SliverNW and Mini-SliverSE fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverSE = SliverNW = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    ///  No longer used
+    /// </summary>
+    class function NWSE(const NorthWest, SouthEast: TSlice; var Changed: TSliverChanges): TSliver; static;
+    /// <summary>
+    ///  Take two neighboring slices NE and SW.
+    ///  Transform NE -> Mini-SliverSW, transform SW -> mini-SliverNE.
+    ///  Now Mini-SliverNE and Mini-SliverSW fully overlap, AND them and return the result.
+    ///  Changed:= scUnchanged if SliverSW = SliverNE = Result, :=scChanged otherwise
+    ///  Changed = scInvalid if result = 0.
+    ///  No longer used
+    /// </summary>
+    class function NESW(const NorthEast, SouthWest: TSlice; var Changed: TSliverChanges): TSliver; static;
   private
   end;
+
+
+
+//  /// <summary>
+//  ///  Not implemented yet, not sure what this does.
+//  /// </summary>
+//  TMegaSlice = record
+//  public
+//    class function NESW(const NorthEast, SouthWest: TSlice): TMegaSlice; static;
+//    class function NWSE(const NorthWest, SouthEast: TSlice): TMegaSlice; static;
+//  public
+//    case integer of
+//      64: (Slices: array [0 .. 32] of TSlice);
+//      8: (Data8: array [0 .. (2048 div 8) - 1] of uint64);
+//      4: (Ints: array [0 .. (2048 div 4) - 1] of uint32);
+//      2: (Words: array [0 .. (2048 div 2) - 1] of word);
+//      1: (bytes: array [0 .. 2047] of byte);
+//  end;
 
   /// <summary>
   ///  Deprecated, a superslice is the union between to slices, a 4x3 area.
@@ -685,53 +738,6 @@ type
            FUnknown: TGridData);
   end;
 
-  PActiveSlice = ^TActiveSlice;
-
-  TActiveSliceReverseFactory = record
-    FActiveSlice: PActiveSlice;
-    constructor Create(Parent: PActiveSlice);
-  end;
-
-  TActiveSlice = packed record
-  private type
-    TActive = set of byte;
-  private
-    FActive: TActive;
-    FSizeX: integer;
-  strict private
-    FActiveCount: integer;
-  public type
-    TActiveEnumerator = record
-    private
-      FParent: PActiveSlice;
-      FIndex: integer;
-      FSizeX: integer;
-      FMoveForward: boolean;
-    public
-      constructor Create(ActiveSlice: PActiveSlice; MoveForward: boolean; SizeX: integer);
-      function MoveNext: boolean; inline;
-      function GetCurrent: integer; inline;
-      property Current: integer read GetCurrent;
-    end;
-  public
-    //Get the next bit set, starting from bit(previous+1)
-    //Mask off the bits already processed
-    //and from that point onward look for the next set bit.
-    function GetEnumerator: TActiveEnumerator;
-    function Reverse: TActiveSliceReverseFactory;
-    function NextSetBit(previous: integer): integer;
-    function PreviousSetBit(Next: integer): integer;
-    procedure Activate(index: integer);
-    procedure Reset(index: integer);
-    constructor Create(MaxX, MaxY: integer); overload;
-    constructor Create(MinX, MinY, MaxX, MaxY, SizeX: integer); overload;
-    property ActiveCount: integer read FActiveCount;
-  end;
-
-  TActiveSliceReverseFactoryHelper = record helper for TActiveSliceReverseFactory
-    function GetEnumerator: TActiveSlice.TActiveEnumerator;
-  end;
-
 
   /// <summary>
   ///  A grid is a grid of slices.
@@ -752,10 +758,9 @@ type
     end;
   private
     /// <summary>
-    ///  array[FSizeX,FSizeY] of TSlice (remember, by design slices overlap)
+    ///  array[FSizeX,FSizeY] of TSlice (remember by design slices overlap)
     /// </summary>
     FData: TArray<TSlice>;
-    FActive: TActiveSlice;
     FSizeX, FSizeY: integer;
     /// <summary>
     ///  Is the grid free of invalid slices?
@@ -795,7 +800,6 @@ type
     ///  Pass nil in MinSlice if any slice will do.
     /// </summary>
     procedure GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
-    function SliverSolveReverse(x, y, MinX, MinY: integer): TSliverChanges;
   public type
     /// <summary>
     ///  After the basic overlapping of gridwalker has run out of steam
@@ -1855,85 +1859,39 @@ begin
 end;
 
 // Solve the given sliver with its neighbors to the East and South
-// Returns the status of any changes
+// Returns true if there was a change.
 function TGrid.SliverSolve(x, y: integer; MaxX, MaxY: integer): TSliverChanges;
 var
   Sliver: TSliver;
   ResultA: TSliverChanges;
 begin
   var SizeX:= Self.FSizeX;
-  var IndexNW:= (y * SizeX) + x;
   //EW
   if x < (MaxX) then begin
-    var IndexEast:= IndexNW + 1;
+    var IndexWest:= (y * SizeX) + x;
+    var IndexEast:= IndexWest+1;
     //If there is a problem the sliver will be invalid.
-    Sliver:= TSliver.EW(Self[IndexEast], Self[IndexNW], ResultA);
-    //Only forward changes if there is a change (this saves about 10-15% in run time).
-    if ResultA.WestChanged then begin
-      Self[IndexNW]:= Self[IndexNW] and Sliver.West;
-      FActive.Activate(IndexNW);
-    end else FActive.Reset(IndexNW);
-    if ResultA.EastChanged then begin
+    //Sliver:= TSliver.EW(Self[x+1,y], Self[x,y], ResultA);
+    Sliver:= TSliver.EW(Self[IndexEast], Self[IndexWest], ResultA);
+    if ResultA.IsChanged then begin
+      //Self[x,y]:= Self[x,y] and Sliver.West;
+      Self[IndexWest]:= Self[IndexWest] and Sliver.West;
+      //Self[x+1,y]:= Self[x+1,y] and Sliver.East;
       Self[IndexEast]:= Self[IndexEast] and Sliver.East;
-      FActive.Activate(IndexEast);
-    end else FActive.Reset(IndexEast);
+    end;
     if (ResultA.IsInvalid) then Exit(ResultA);
   end; { handle EW }
   // NS
   if y < (MaxY) then begin
-    var IndexSouth:= IndexNW + FSizeX;
-    Sliver:= TSliver.NS(Self[IndexNW], Self[IndexSouth], Result);
-    if Result.NorthChanged then begin
-      Self[IndexNW]:= Self[IndexNW] and Sliver.North;
-      FActive.Activate(IndexNW);
-    end else FActive.Reset(IndexNW);
-    if Result.SouthChanged then begin
-      Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
-      FActive.Activate(IndexSouth);
-    end else FActive.Reset(IndexSouth);
-  end; { handle NS }
-  Result:= Result or ResultA;
-end;
-
-// Solve the given sliver with its neighbors to the West and North
-// Returns the status of any changes
-function TGrid.SliverSolveReverse(x, y: integer; MinX, MinY: integer): TSliverChanges;
-var
-  Sliver: TSliver;
-  ResultA: TSliverChanges;
-begin
-  var SizeX:= Self.FSizeX;
-  var IndexSE:= (y * SizeX) + x;
-  //EW
-  if x > (MinX) then begin
-    var IndexWest:= IndexSE - 1;
-    //If there is a problem the sliver will be invalid.
-    Sliver:= TSliver.EW(Self[IndexSE], Self[IndexWest], ResultA);
-    //Only forward changes if there is a change (this saves about 10-15% in run time).
-    if ResultA.WestChanged then begin
-      Self[IndexWest]:= Self[IndexWest] and Sliver.West;
-      FActive.Activate(IndexWest);
-    end else FActive.Reset(IndexWest);
-    if ResultA.EastChanged then begin
-      Self[IndexSE]:= Self[IndexSE] and Sliver.East;
-      FActive.Activate(IndexSE);
-    end else FActive.Reset(IndexSE);
-    if (ResultA.IsInvalid) then Exit(ResultA);
-  end; { handle EW }
-  // NS
-  if y > (MinY) then begin
-    var IndexNorth:= IndexSE - FSizeX;
-    Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexSE], Result);
-    if Result.NorthChanged then begin
+    var IndexNorth:= (y * SizeX) + x;
+    var IndexSouth:= IndexNorth + FSizeX;
+    Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexSouth], Result);
+    if Result.IsChanged then begin
       Self[IndexNorth]:= Self[IndexNorth] and Sliver.North;
-      FActive.Activate(IndexNorth);
-    end else FActive.Reset(IndexNorth);
-    if Result.SouthChanged then begin
-      Self[IndexSE]:= Self[IndexSE] and Sliver.South;
-      FActive.Activate(IndexSE);
-    end else FActive.Reset(IndexSE);
+      Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
+    end;
   end; { handle NS }
-  Result:= Result or ResultA;
+  Result:= Result + ResultA;
 end;
 
 
@@ -5207,12 +5165,6 @@ begin
   Result:= a.Data8 <> b.Data8;
 end;
 
-function TSliver.PopCount: integer;
-//RCX = Self
-asm
-  popcnt rax,rcx
-end;
-
 class function TSliverHelper.NSSlow(const North, South: TSlice; out Changed: TSliverChanges): TSliver;
 var
   N, S: TSliver;
@@ -5231,15 +5183,14 @@ begin
   end;
   // Conjunct the two slivers
   Result:= N and S;
-  Changed:= TSliverChanges.Changes(N,S, Result);
-  //Changed:= (N <> S); // or 1 if changes
-  //Changed:= Changed and Result; // or 2 if invalid
+  Changed:= (N <> S); // or 1 if changes
+  Changed:= Changed and Result; // or 2 if invalid
 end;
 
 class function TSliverHelper.NS(const North, South: TSlice; out Changed: TSliverChanges): TSliver;
   //RCX =North: PSlice
   //RDX =South: PSlice
-  //R8 = @Changed: PSliverChanges ((scUnchanged=0, scChanged=1, scInvalid=3));
+  //R8 = Changed: PSliverChanges ((scUnchanged=0, scChanged=1, scInvalid=3));
   //RAX = Result: TSliver (as Int64)
 begin
   Result:= AVXGENERATE_TSLIVERHELPER_NS(North, South, Changed);
@@ -5310,9 +5261,54 @@ end;
 //        mov [r8],dl           //save the status
 //end;
 
+class function TSliverHelper.NWSE(const NorthWest, SouthEast: TSlice; var Changed: TSliverChanges): TSliver;
+var
+  NW, SE: TSliver;
+  i: integer;
+begin
+  // First take the NW slice and remove pixel 0,1,2
+  for i:= 0 to 7 do begin
+    NW.bytes[i]:= Remove012(NorthWest.Data8[i]);
+  end;
+  // Now we are left with 6 pixels in the following layout
+  // 210
+  // 543
+  // The west pixels need to be removed
+  // First remove pixel 5, this means folding 2 dword
+  // This reduces the sliver to 4 bytes
+  NW.Data4[0]:= NW.Data4[0] or NW.Data4[1];
+  // Finally remove pixel 2
+  // This reduces the sliver to a 16 bits.
+  NW.bytes[0]:= TSuperSlice.LookupRemove2[NW.Data2[0]];
+  NW.bytes[1]:= TSuperSlice.LookupRemove2[NW.Data2[1]];
+  // Next we process the SE slice
+  // First remove 678
+  SE.Data8:= SouthEast.Data8[0];
+  for i:= 1 to 7 do begin
+    SE.Data8:= SE.Data8 or SouthEast.Data8[i];
+  end;
+  // Now we are left with 6 pixels in the following layout
+  // 210
+  // 543
+  // We need to remove the eastern most pixels
+  // First remove pixel 3 by folding every byte with its neighbor
+  // This reduces the sliver from 8 to 4 bytes
+  for i:= 0 to 3 do begin
+    SE.bytes[i]:= SE.bytes[i * 2] or SE.bytes[i * 2 + 1];
+  end;
+  // The last step is to remove bit 0.
+  // This reduces the sliver to 2 bytes.
+  SE.bytes[0]:= TSuperSlice.LookupRemove0[SE.Data2[0]];
+  SE.bytes[1]:= TSuperSlice.LookupRemove0[SE.Data2[1]];
+  // Return the combined minislivers
+  Result:= SE and NW;
+  Changed:= Changed or (SE <> NW); // or 1 if changed
+  Changed:= Changed and Result; // or 2 if invalid
+end;
+
 class function TSliverHelper.EWSlow(const East, West: TSlice; out Changed: TSliverChanges): TSliver;
 var
-  E, W: TSliver;
+  E, w: TSliver;
   Temp1, Temp2: TSlice;
   i: integer;
 begin
@@ -5352,9 +5348,8 @@ begin
     E.bytes[i]:= TSuperSlice.LookupRemove0[Temp2.Data2[i]];
   end;
   Result:= W and E;
-  Changed:= TSliverChanges.Changes(E,W,Result);
-  //Changed:= (W <> E); // or 1 if changed
-  //Changed:= Changed and Result; // or 2 if invalid
+  Changed:= (W <> E); // or 1 if changed
+  Changed:= Changed and Result; // or 2 if invalid
 end;
 
 
@@ -5520,24 +5515,14 @@ asm
         xor edx,edx           //assume stats = scUnchanged
         and rax,r11           //And the two slivers
 @StatusUpdates:
-//  Changed:= Changed and Result; // or 4 if invalid
+//  Changed:= Changed and Result; // or 2 if invalid
 //r8 = @Changed
         setz dl               //If the result = 0 (invalid, then mark it as such).
-        //shl edx,2
-//Check if E has changed
-        mov r9,rcx            //save the original
-        and rcx,rax           //Does E stay the same?
-        cmp rcx,r9
-        setne r9b
-        lea edx,[r9d+edx*4]
-
-//Check if W has changed
-        xor ecx,ecx           //break false dependency in setcc cl
-        mov r9,r11            //save the original
-        and r11,rax
-        cmp r11,r9
-        setne cl
-        lea edx,[edx+ecx*2]   //Add W to the status.
+        shl edx,1
+//  Changed:= Changed or (N <> S); // or 1 if changes
+        xor rcx,r11           //Are the two slivers different?
+        setne cl              //yes, so there will be a change
+        or dl,cl              //merge the two change flags
         mov [r8],dl           //save the status
 end;
 
@@ -5599,6 +5584,49 @@ asm
   movdqu [rdx+48],xmm2
 end;
 
+class function TSliverHelper.NESW(const NorthEast, SouthWest: TSlice; var Changed: TSliverChanges): TSliver;
+var
+  NE, SW: TSliver;
+  i: integer;
+begin
+  // First take the NE slice and remove pixel 0,1,2
+  for i:= 0 to 7 do begin
+    NE.bytes[i]:= Remove012(NorthEast.Data8[i]);
+  end;
+  // Now we are left with 6 pixels in the following layout
+  // 210
+  // 543
+  // The east pixels need to be removed
+  // First remove pixel 3 by folding every byte with its neighbor
+  // This reduces the sliver from 8 to 4 bytes
+  for i:= 0 to 3 do begin
+    NE.bytes[i]:= NE.bytes[i * 2] or NE.bytes[i * 2 + 1];
+  end;
+  // The last step is to remove bit 0.
+  // This reduces the sliver to 2 bytes.
+  NE.bytes[0]:= TSuperSlice.LookupRemove0[NE.Data2[0]];
+  NE.bytes[1]:= TSuperSlice.LookupRemove0[NE.Data2[1]];
+  // Next we process the SW slice
+  // First remove 678
+  SW.Data8:= SouthWest.Data8[0];
+  for i:= 1 to 7 do begin
+    SW.Data8:= SW.Data8 or SouthWest.Data8[i];
+  end;
+  // Now we are left with 6 pixels in the following layout
+  // 210
+  // 543
+  // First remove pixel 5, this means folding every dword
+  // This reduces the sliver to 4 bytes
+  SW.Data4[0]:= SW.Data4[0] or SW.Data4[1];
+  // Finally remove pixel 2
+  // This reduces the sliver to a 16 bits.
+  SW.bytes[0]:= TSuperSlice.LookupRemove2[SW.Data2[0]];
+  SW.bytes[1]:= TSuperSlice.LookupRemove2[SW.Data2[1]];
+  // Combine the two minislivers
+  Result:= SW and NE;
+  Changed:= Changed or (SW <> NE);
+  Changed:= Changed and Result;
+end;
 
 function TSliverHelper.SlowNorth: TSlice;
 var
@@ -5687,6 +5715,8 @@ db  $c4,$c1,$59,$74,$e7          //vpcmpeqb xmm4,xmm4,xmm15
 db  $c5,$fa,$7f,$62,$30          //vmovdqu XMMWORD PTR [rdx+0x30],xmm4
 end;
 
+
+
 function TSliverHelper.SlowEast: TSlice;
 var
   i: integer;
@@ -5743,6 +5773,68 @@ asm
   movdqu [rdx+48],xmm3
 end;
 
+
+function TSliverHelper.NorthEast: TSlice;
+var
+  Temp1, Temp2: TSlice;
+  i: integer;
+begin
+  // We start with
+  // ---   ---
+  // 10-   BA-
+  // 32-   DC-
+  // Add pixels 0,1,2
+  // This means expanding every bit into a byte
+  // Or rather every byte into an int64;
+  // This expands 2 bytes into 16 bytes
+  for i:= 0 to 1 do begin
+    Temp1.Data8[i]:= TSuperSlice.Lookup012[Self.bytes[i]];
+  end;
+  // Now we have
+  // 210   210
+  // BA-   43-
+  // DC-   65-
+  // We already have pixel 0, so we only need to add pixel 3 and 6.
+  // Next add pixel 3, double every byte
+  // this expands the sliver from 16 to 32 bytes
+  for i:= 0 to 15 do begin
+    Temp2.bytes[i * 2]:= Temp1.bytes[i];
+    Temp2.bytes[i * 2 + 1]:= Temp1.bytes[i];
+  end;
+  // Finally add pixel 6, his doubles every int64.
+  // Expanding the slice from 32 (= 4 int64) into 64 bytes (=8int64)
+  for i:= 0 to 3 do begin
+    Result.Data8[i * 2]:= Temp2.Data8[i];
+    Result.Data8[i * 2 + 1]:= Temp2.Data8[i];
+  end;
+end;
+
+function TSliverHelper.NorthWest: TSlice;
+var
+  Temp1, Temp2: TSlice;
+  i: integer;
+begin
+  // Add pixels 0,1,2   {the north part}
+  // This means expanding every bit into a byte
+  // Or rather every byte into an int64;
+  for i:= 0 to 7 do begin
+    Temp1.Data8[i]:= TSuperSlice.Lookup012[Self.bytes[i]];
+  end;
+  // We already have pixel 2, so just add pixel 5 and 8
+  // Now add pixel 5
+  // Double every uint32
+  // Expanding 16 bytes (=4 int32) into 32 bytes
+  for i:= 0 to 3 do begin
+    Temp2.Data4[i * 2]:= Temp1.Data4[i];
+    Temp2.Data4[i * 2 + 1]:= Temp1.Data4[i];
+  end;
+  // Finally add pixel 8
+  // Just copy the half-slice twice.
+  // Expanding 32 bytes into 64.
+  Move(Temp2, Result, 32);
+  Move(Temp2, (@Result.bytes[32])^, 32);
+end;
+
 function TSliverHelper.SlowSouth: TSlice;
 var
   i: integer;
@@ -5766,6 +5858,52 @@ asm
   movdqu [rdx+16],xmm0
   movdqu [rdx+32],xmm0
   movdqu [rdx+48],xmm0
+end;
+
+function TSliverHelper.SouthEast: TSlice;
+var
+  i: integer;
+  Temp1, Temp2: TSlice;
+begin
+  // Add pixels 0, 3, 6, 7, 8
+  // First add pixel 0.
+  // This expands the sliver from 2 to 4 bytes
+  for i:= 0 to 1 do begin
+    Temp1.Data2[i]:= TSuperSlice.Lookup0[Self.bytes[i]];
+  end;
+  // Next add pixel 3, double every byte
+  // this expands the sliver from 4 to 8 bytes
+  for i:= 0 to 3 do begin
+    Temp2.bytes[i * 2]:= Temp1.bytes[i];
+    Temp2.bytes[i * 2 + 1]:= Temp1.bytes[i];
+  end;
+  // Add pixels 678
+  // This means copying the pattern 8 times
+  for i:= 0 to 7 do begin
+    Result.Data8[i]:= Temp2.Data8[0];
+  end;
+end;
+
+function TSliverHelper.SouthWest: TSlice;
+var
+  Temp1: TSlice;
+  i: integer;
+begin
+  // Add pixels 2,5,6,7,8
+  // First add pixel 2.
+  // Expanding 2 into 4 bytes
+  for i:= 0 to 1 do begin
+    Temp1.Data2[i]:= TSuperSlice.Lookup2[Self.bytes[i]];
+  end;
+  // Now add pixel 5
+  // Double every uint32
+  // Expanding 4 bytes (=1 int32) into 8 bytes
+  Temp1.Data4[1]:= Temp1.Data4[0];
+  // Add pixels 678
+  // This means copying the pattern 8 times
+  for i:= 0 to 7 do begin
+    Result.Data8[i]:= Temp1.Data8[0];
+  end;
 end;
 
 { TLookupTable }
@@ -5973,9 +6111,9 @@ end;
 
 { TSliverChanges }
 
-class operator TSliverChanges.BitwiseOr(const a, b: TSliverChanges): TSliverChanges;
+class operator TSliverChanges.Add(const a, b: TSliverChanges): TSliverChanges;
 begin
-  Result.Raw:= a.Raw or b.Raw;
+  Result.AsByte:= a.AsByte or b.AsByte;
 end;
 
 class operator TSliverChanges.Add(a: integer; const b: TSliverChanges): integer;
@@ -5986,90 +6124,67 @@ end;
 class operator TSliverChanges.BitwiseAnd(const a: TSliverChanges; const b: TSliver): TSliverChanges;
 begin
   Result:= a;
-  if (b.Data8 = 0) then Include(Result.Data, scInvalid);
+  if (b.Data8 = 0) then Result.AsByte:= Result.AsByte or byte(Ord(scInvalid));
 end;
 
 class function TSliverChanges.Changed: TSliverChanges;
 begin
-  Result.Data:= [scNEChanged,scSWChanged];
+  Result.AsByte:= Ord(scChanged);
 end;
 
-class function TSliverChanges.Changes(const NE, SW, Sliver: TSliver): TSliverChanges;
+class operator TSliverChanges.Implicit(a: boolean): TSliverChanges;
 begin
-  //Do not optimize an early out Result:=7 here, because it will not match
-  //The behaviour in the optimized code.
-  //Sliver being zero is the rare condition anyway and this code is only called
-  //in the slow versions of the code.
-  if Sliver = 0 then Result.Raw:= 4
-  else Result.Raw:= 0;
-  if (Sliver and NE) <> NE then Include(Result.Data, scNEChanged);
-  if (Sliver and SW) <> SW then Include(Result.Data, scSWChanged);
-end;
-
-function TSliverChanges.EastChanged: boolean;
-begin
-  Result:= (scNEChanged in Self.Data);
+  Result.AsBoolean:= (a <> false); // make sure malformed booleans still transform correctly
 end;
 
 class function TSliverChanges.Invalid: TSliverChanges;
 begin
-  Result.Data:= [scNEChanged,scSWChanged,scInvalid];
+  Result.AsByte:= Ord(scInvalid);
 end;
 
 function TSliverChanges.IsValid: boolean;
 begin
-  Result:= not(scInvalid in Self.Data);
+  Result:= Self.AsByte in [0, 1];
 end;
 
 function TSliverChanges.KeepGoing: boolean;
 begin
-  Result:= (Self.Data * [scNEChanged,scSWChanged]) <> [];
+  Result:= (Self.AsByte = byte(Ord(scChanged)));
 end;
 
 function TSliverChanges.IsChanged: boolean;
 begin
-  Result:= (Self.Data <> []);
+  Result:= (Self.AsByte <> 0);
 end;
 
 function TSliverChanges.IsInvalid: boolean;
 begin
-  Result:= (scInvalid in Self.Data);
+  Result:= Self.AsByte > 1;
 end;
 
 function TSliverChanges.IsUnchanged: boolean;
 begin
-  Result:= (Self.Data = []);
+  Result:= (Self.AsByte = Byte(Ord(scUnchanged)));
 end;
 
+class operator TSliverChanges.explicit(a: TSliverChanges): boolean;
+begin
+  Result:= a.AsBoolean;
+end;
 
-//class operator TSliverChanges.LogicalOr(const a: TSliverChanges; const b: boolean): TSliverChanges;
-//begin
-//  Result.AsByte:= a.AsByte or byte(b <> false);
-//end;
+class operator TSliverChanges.LogicalOr(const a: TSliverChanges; const b: boolean): TSliverChanges;
+begin
+  Result.AsByte:= a.AsByte or byte(b <> false);
+end;
 
 class function TSliverChanges.UnChanged: TSliverChanges;
 begin
-  Result.Data:= [];
-end;
-
-function TSliverChanges.NorthChanged: boolean;
-begin
-  Result:= (scNEChanged in Self.Data);
-end;
-
-function TSliverChanges.WestChanged: boolean;
-begin
-  Result:= (scSWChanged in Self.Data);
+  Result.AsByte:= 0;
 end;
 
 class operator TSliverChanges.NotEqual(a, b: TSliverChanges): boolean;
 begin
-  Result:= (a.Raw <> b.Raw);
-end;
-
-function TSliverChanges.SouthChanged: boolean;
-begin
-  Result:= (scSWChanged in Self.Data);
+  Result:= (a.AsByte <> b.AsByte);
 end;
 
 { TMaskedBits }
@@ -6304,7 +6419,6 @@ constructor TGrid.Create(SizeX, SizeY: integer);
 begin
   Assert((SizeX * SizeY) >= 1);
   SetLength(Self.FData, SizeX * SizeY);
-  Self.FActive:= TActiveSlice.Create(SizeX, SizeY);
   Self.FSizeX:= SizeX;
   Self.FSizeY:= SizeY;
   Self.FIsValid:= true;
@@ -6439,8 +6553,33 @@ begin
 end;
 
 function TGrid.GridSolve: TSliverChanges;
+var
+  x, y: integer;
+  ChangeCount: integer;
+label
+  Done;
 begin
-  Result:= GridSolve(0,0,FSizeX-1, FSizeY-1);
+  repeat
+    ChangeCount:= 0;
+    for y:= 0 to FSizeY-1 do begin
+      for x:= 0 to FSizeX-1 do begin
+        Result:= SliverSolve(x, y, FSizeX-1, FSizeY-1);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+      end; { for y }
+    end; { for x }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    for y:= FSizeY-1 downto 0 do begin
+      for x:= FSizeX-1 downto 0 do begin
+        Result:= SliverSolve(x, y, FSizeX-1, FSizeY-1);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result
+      end; { for y }
+    end; { for x }
+  until (ChangeCount = 0);
+Done:
+  Self.FIsValid:= Result.IsValid;
 end;
 
 function TGrid.GridSolve(MinX, MinY, MaxX, MaxY: integer): TSliverChanges;
@@ -6451,32 +6590,24 @@ label
   Done;
 begin
   repeat
-    //ChangeCount:= 0;
-    for var Index in FActive do begin
-      Result:= SliverSolve(Index mod FSizeX, Index div FSizeX, MaxX, MaxY);
-      if Result.IsInvalid then goto Done;
-    end; {while working forward}
-//    for y:= MinY to MaxY do begin
-//      for x:= MinX to MaxX do begin
-//        Result:= SliverSolve(x, y, MaxX, MaxY);
-//        if (Result.IsInvalid) then goto Done;
-//        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
-//      end; { for y }
-//    end; { for x }
-    if (FActive.ActiveCount = 0) then goto Done;
-    //ChangeCount:= 0;
-    for var Index in FActive.Reverse do begin
-      Result:= SliverSolveReverse(Index mod FSizeX, Index div FSizeX, MaxX, MaxY);
-      if (Result.IsInvalid) then goto Done;
-    end; {while working backward}
-//    for y:= MaxY downto MinY do begin
-//      for x:= MaxX downto MinX do begin
-//        Result:= SliverSolve(x, y, MaxX, MaxY);
-//        if (Result.IsInvalid) then goto Done;
-//        ChangeCount:= ChangeCount + Result
-//      end; { for y }
-//    end; { for x }
-  until (FActive.ActiveCount = 0);
+    ChangeCount:= 0;
+    for y:= MinY to MaxY do begin
+      for x:= MinX to MaxX do begin
+        Result:= SliverSolve(x, y, MaxX, MaxY);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+      end; { for y }
+    end; { for x }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    for y:= MaxY downto MinY do begin
+      for x:= MaxX downto MinX do begin
+        Result:= SliverSolve(x, y, MaxX, MaxY);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result
+      end; { for y }
+    end; { for x }
+  until (ChangeCount = 0);
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
@@ -6531,6 +6662,9 @@ begin
 end;
 
 function TGrid.SpeculativeExploration(Strategy: TExplorationStrategy; const SamplePoint: TPoint): TSliverChanges;
+const
+  Unchanged = false;
+  Changed = true;
 var
   Pivot: TPoint;
   Count: integer;
@@ -6554,7 +6688,7 @@ begin
   Count:= PivotSlice.PopCount;
   NextBit:= -1;     //Start with the first set bit in the slice
   ValidCount:= 0;   //keep track of the number of valid constellations
-  Result:= TSliverChanges.UnChanged;
+  Result:= TSliverChanges(UnChanged);
   for i:= 0 to Count -1 do begin
     TrailGrid:= Self.Clone;
     NextBit:= PivotSlice.NextSetBit(NextBit);  //guarenteed to not overflow, because we keep within the number of bits set.
@@ -6564,7 +6698,7 @@ begin
     TrailGrid[Pivot]:= TrailSlice;
     //Now we just do a normal solve until we can get no further improvement, or until a conflict occurs.
     PivotStatus:= TrailGrid.GridSolve;
-    if (PivotStatus.IsChanged) then Result:= TSliverChanges.Changed;
+    if (PivotStatus.IsChanged) then Result:= TSliverChanges(Changed);
     //////////////////////
     ///  At this point we could choose to use a recursive approach, but let's keep
     ///  it simple for now.
@@ -6952,215 +7086,6 @@ begin
   for var i:= 0 to 3 do begin
     Result.FData[i]:= not(A.FData[i]);
   end;
-end;
-
-{ TActiveSlice }
-
-procedure TActiveSlice.Activate(index: integer);
-//rcx = self
-//edx = index
-asm
-  bts [rcx],edx            //if CF=0, then we added a flag
-  jc @done
-  inc dword ptr [rcx+32]   //increase the active counter
-@done:
-  rep ret
-end;
-
-procedure TActiveSlice.Reset(index: integer);
-//rcx = self
-//edx = index
-asm
-  btr [rcx],edx            //if CF=1, then we removed a flag
-  jnc @done
-  dec dword ptr [rcx+32]   //decrease the active counter
-@done:
-  rep ret
-end;
-
-
-
-
-function TActiveSlice.Reverse: TActiveSliceReverseFactory;
-begin
-  Result:= TActiveSliceReverseFactory.Create(@Self);
-end;
-
-constructor TActiveSlice.Create(MaxX, MaxY: integer);
-begin
-  FSizeX:= MaxX;
-  FillChar(FActive, SizeOf(FActive), #0);
-  FActiveCount:= MaxX * MaxY;
-  FillChar(FActive, FActiveCount div 8, $FF);
-end;
-
-constructor TActiveSlice.Create(MinX, MinY, MaxX, MaxY, SizeX: integer);
-begin
-  FSizeX:= SizeX;
-  FillChar(FActive, SizeOf(FActive), #0);
-  FActiveCount:= 0;
-  for var y := MinY to MaxY do begin
-    for var x := MinX to MaxX do begin
-      var Index:= x + y*SizeX;
-      Activate(Index);
-    end; {for x}
-  end; {for y}
-end;
-
-function TActiveSlice.GetEnumerator: TActiveEnumerator;
-begin
-  Result:= TActiveSlice.TActiveEnumerator.Create(@Self, false, FSizeX);
-end;
-
-function TActiveSlice.NextSetBit(previous: integer): integer;
-asm
-  // RCX: self
-  // EDX: previous
-  // Return result in EAX (0..255 is bit position of next set bit) 256=not found
-  // r10 = copy of self
-  // r8 = qword index
-  // r9 = population count
-  mov eax,256           // assume failure
-  cmp edx,255           // are we all done?
-  jge @done             // yes, done
-  mov r10,rcx           // r10=self, We need cl for shifting
-  inc edx               // we're looking for the next bit
-  mov ecx,edx           // shift out the bits already processed
-  and ecx,63            // only take 0..63 into account so we don't upset the offset calc
-  // Get the relevant int64
-  shr edx,6             // Get the revelant 64 bit section (div 64)
-  lea r8,[rdx*8]        // but note that that 64 bits = 8 bytes (rounded down).
-@repeat:
-  mov r9,[r10+r8]       // get the next section to investigate
-  shr r9,cl             // shift out the bits we've already looked at
-  mov eax,64            // BSF DEST, SOURCE: if SOURCE=0 then DEST will be unchanged.
-  bsf rax,r9            // get the next set bit, CF=0 if we found it
-  lea eax,[eax+ecx]     // add the bitcount shifted out back in
-  // if eax=64 then all bits set in our section are clear.
-  // If r8d = 7 then we are done, if not we need to look further.
-  lea rax,[rax+r8*8]    // Add the section offset back in.
-  jnz @done             // We found a bit
-  // Oops, ZF=1, meaning the section is empty, investigate the next section.
-  xor ecx,ecx           // reset at the start of the next session
-  cmp r8d,32-8          // Did we investigate all sections? ZF=1 if true
-  lea r8,[r8+8]         // Let's prepare for a new round
-  jne @repeat
-@done:
-  //mov edx,512
-  //cmp eax,512
-  //cmovnc eax,edx
-  rep ret
-end;
-
-function TActiveSlice.PreviousSetBit(Next: integer): integer;
-asm
-  // RCX: self
-  // EDX: previous
-  // Return result in EAX (0..255 is bit position of next set bit) 256=not found
-  // r10 = copy of self
-  // r8 = qword index
-  // r9 = population count
-  mov eax,-1            // assume failure
-  cmp edx,0             // are we all done?
-  jle @done             // yes, done
-  mov r10,rcx           // r10=self, We need cl for shifting
-  dec edx               // we're looking for the previous bit
-  mov ecx,edx           // shift out the bits already processed
-  and ecx,63            // only take 0..63 into account so we don't upset the offset calc
-  // Get the relevant int64
-  shr edx,6             // Get the revelant 64 bit section (div 64)
-  lea r8,[rdx*8]        // but note that that 64 bits = 8 bytes (rounded down).
-@repeat:
-  mov r9,[r10+r8]       // get the next section to investigate
-  shr r9,cl             // shift out the bits we've already looked at
-  mov eax,64            // BSF DEST, SOURCE: if SOURCE=0 then DEST will be unchanged.
-  bsf rax,r9            // get the next set bit, CF=0 if we found it
-  lea eax,[eax+ecx]     // add the bitcount shifted out back in
-  // if eax=64 then all bits set in our section are clear.
-  // If r8d = 7 then we are done, if not we need to look further.
-  lea rax,[rax+r8*8]    // Add the section offset back in.
-  jnz @done             // We found a bit
-  // Oops, ZF=1, meaning the section is empty, investigate the next section.
-  xor ecx,ecx           // reset at the start of the next session
-  cmp r8d,0             // Did we investigate all sections? ZF=1 if true
-  lea r8,[r8-8]         // Let's prepare for a new round
-  jne @repeat
-@done:
-  //mov edx,512
-  //cmp eax,512
-  //cmovnc eax,edx
-  rep ret
-end;
-
-{ TActiveSlice.TGridEnumerator }
-
-constructor TActiveSlice.TActiveEnumerator.Create(ActiveSlice: PActiveSlice; MoveForward: boolean; SizeX: integer);
-begin
-  FParent:= ActiveSlice;
-  FMoveForward:= MoveForward;
-  FSizeX:= SizeX;
-  case FMoveForward of
-    true: FIndex:= -1;
-    false: FIndex:= 256;
-  end;
-end;
-
-function TActiveSlice.TActiveEnumerator.GetCurrent: integer;
-begin
-  Result:= FIndex;
-end;
-
-
-
-function TActiveSlice.TActiveEnumerator.MoveNext: boolean;
-var
-  NewIndex: integer;
-begin
-  Result:= true;
-  case FMoveForward of
-    true: begin
-      NewIndex:= FParent.NextSetBit(FIndex);
-      if NewIndex >= 256 then exit(false); //we are done
-      var Gap:= NewIndex - FIndex;
-      if Gap > 1 then begin
-        //We have skipped over a gap.
-        //make sure to step one back, so that we update the neighbor as well
-        FIndex:= NewIndex - 1;
-        if Gap > FSizeX then begin
-          //We have skipped over a line, make sure to work on the northern neighbors as well
-          FIndex:= NewIndex - FSizeX;
-        end;
-      end else FIndex:= NewIndex;
-    end; {true:}
-    false: begin
-      NewIndex:= FParent.PreviousSetBit(FIndex);
-      if NewIndex < 0 then exit(false); //we are done
-      var Gap:= FIndex - NewIndex;
-      if Gap > 1 then begin
-        //We have skipped over a gap.
-        //make sure to step one back, so that we update the neighbor as well
-        FIndex:= NewIndex + 1;
-        if Gap > FSizeX then begin
-          //We have skipped over a line, make sure to work on the southern neighbors as well
-          FIndex:= NewIndex + FSizeX;
-        end;
-      end else FIndex:= NewIndex;
-    end; {false}
-  end; {case}
-end;
-
-{ TActiveSliceReverseFactory }
-
-function TActiveSliceReverseFactoryHelper.GetEnumerator: TActiveSlice.TActiveEnumerator;
-begin
-  Result:= TActiveSlice.TActiveEnumerator.Create(FActiveSlice, true, FActiveSlice.FSizeX);
-end;
-
-{ TActiveSliceReverseFactory }
-
-constructor TActiveSliceReverseFactory.Create(Parent: PActiveSlice);
-begin
-  FActiveSlice:= Parent;
 end;
 
 end.

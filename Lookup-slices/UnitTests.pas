@@ -397,7 +397,7 @@ begin
 end;
 
 const
-  TimingRepetitions = (1000*1000)-1;//100000000-1;
+  TimingRepetitions = 1000000-1;//100000000-1;
 
 class procedure TSliceTests.TSlice_NextSetBit;
 var
@@ -895,7 +895,7 @@ var
   StatusA, StatusB: TSliverChanges;
   i: integer;
 begin
-  for i:= 0 to (TimingRepetitions * 100) do begin
+  for i:= 0 to TimingRepetitions div 5 do begin
     N:= TSlice.Random;
     S:= TSlice.Random;
     a:= TSliver.NSSlow(N,S, statusA);
@@ -928,7 +928,7 @@ var
   StatusA, StatusB: TSliverChanges;
   i: integer;
 begin
-  for i:= 0 to (TimingRepetitions*100) do begin
+  for i:= 0 to (TimingRepetitions) do begin
     E:= TSlice.Random;
     W:= TSlice.Random;
     a:= TSliver.EWSlow(E,W, statusA);
