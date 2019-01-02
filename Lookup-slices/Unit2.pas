@@ -3799,6 +3799,7 @@ begin
   end;
   //Start the timer
   var Timer:= TStopWatch.StartNew;
+  var HiResTimer:= THiresStopWatch.StartNew;
   var Status:= MySlices.GridSolve(3,3,12,12);
   if Status.IsValid then Status:= MySlices.GetUniqueSolution;
 (*
@@ -3854,8 +3855,10 @@ begin
     end; {if work to be done}
   until (ValidStates = 0);
   *)
+  HiResTimer.Stop;
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  Memo1.Lines.Add(HiResTimer.GetElapsedTicks.ToString+' Ticks until solution');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
