@@ -29,22 +29,22 @@ object Form2: TForm2
     object TabSheet1: TTabSheet
       Caption = 'TabSheet1'
       object Label1: TLabel
-        Left = 88
-        Top = 90
+        Left = 178
+        Top = 20
         Width = 31
         Height = 13
         Caption = 'Label1'
       end
       object Label2: TLabel
-        Left = 88
-        Top = 71
+        Left = 178
+        Top = 39
         Width = 31
         Height = 13
         Caption = 'Label2'
       end
       object Label3: TLabel
-        Left = 296
-        Top = 53
+        Left = 178
+        Top = 58
         Width = 31
         Height = 13
         Caption = 'Label3'
@@ -523,13 +523,22 @@ object Form2: TForm2
         OnClick = BtnInitWithGoE2Click
       end
       object Button1: TButton
-        Left = 2
+        Left = 3
         Top = 105
         Width = 170
         Height = 25
         Caption = 'SolveAndTime'
         TabOrder = 21
         OnClick = Button1Click
+      end
+      object BtnOld_SolveAndTime: TButton
+        Left = 3
+        Top = 77
+        Width = 169
+        Height = 25
+        Caption = 'Old_SolveAndTime'
+        TabOrder = 22
+        OnClick = BtnOld_SolveAndTimeClick
       end
     end
     object TabSheet2: TTabSheet
