@@ -389,7 +389,7 @@ type
     ///  Changed:= scUnchanged if SliverN = SliverS = Result, :=scChanged otherwise
     ///  Changed = scInvalid if result = 0.
     /// </summary>
-    class function NS(const North, South: TSlice; out Changed: TSliverChanges): TSliver; static; inline;
+    class function NS(const North, South: TSlice; out Changed: TSliverChanges): TSliver; static;
     /// <summary>
     ///  Take two neighboring slices E and W.
     ///  Transform E -> SliverW, transform W -> SliverE.
@@ -754,7 +754,7 @@ type
     TGridEnumerator = record
     private
       FParent: PGrid;
-      FIndex, FMax: integer;
+      FIndex, FCount: integer;
     public
       constructor Create(Grid: PGrid);
       function MoveNext: boolean; inline;
@@ -771,8 +771,8 @@ type
     ///  Is the grid free of invalid slices?
     /// </summary>
     FIsValid: boolean;
-    FData: TArray<TSlice>;
-    //FData: array[0..255] of TSlice;
+    //FData: TArray<TSlice>;
+    FData: array[0..255] of TSlice;  //to be replaced by a variable size structure later
     function GetSlice(const Coordinate: TPoint): TSlice; overload; inline;
     procedure SetSlice(const Coordinate: TPoint; const Value: TSlice); overload; inline;
     function GetSlice(x,y: integer): TSlice; overload; inline;
@@ -1186,10 +1186,17 @@ function Random64: Uint64;
 function GetCurrentProcessorNumber: DWORD; stdcall;
 procedure Move(const source; var Dest; Size: NativeInt);
 
-   {$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\AVXGenerate.o'}
+   //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\AVXGenerate.o'}
+   //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\AVX_Lib.dll'}
+const
+  AVXlib = 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\AVX_lib.dll';
 
-function AVXGENERATE_TSLIVERHELPER_NS(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external name 'AVXGENERATE_$$_TSLIVERHELPER_NS';
-function AVXGENERATE_TSLIVERHELPER_EW(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external name 'AVXGENERATE_$$_TSLIVERHELPER_EW';
+function AVXGENERATE_TSLIVERHELPER_NS(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external AVXlib name 'TSliverHelper_NS';
+function AVXGENERATE_TSLIVERHELPER_EW(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external AVXlib name 'TSliverHelper_EW';
+function AVXGENERATE_TEST: boolean; external AVXlib name 'Test';
+procedure TSlice_ForceSingleBit(Self: pointer; index: integer); external AVXlib name 'TSlice_ForceSingleBit';
+function TSliverHelper_West(Self: pointer): TSlice; external AVXlib name 'TSliverHelper_West';
+function TSliverHelper_East(Self: pointer): TSlice; external AVXlib name 'TSliverHelper_East';
 
 implementation
 
@@ -1979,7 +1986,6 @@ end;
 function TGrid.SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
 var
   Sliver: TSliver;
-  ResultA: TSliverChanges;
   IndexCenter: integer;
 
   function DoEW: TSliverChanges;
@@ -4809,12 +4815,14 @@ procedure TSlice.ForceSingleBit(Index: integer);
 //RCX = @self
 //edx = index
 asm
-  pxor xmm0,xmm0
-  movdqu [rcx],xmm0
-  movdqu [rcx+16],xmm0
-  movdqu [rcx+32],xmm0
-  movdqu [rcx+48],xmm0
-  bts [rcx],edx
+  jmp TSlice_ForceSingleBit
+  //TSlice_ForceSingleBit(@self, index);
+//  pxor xmm0,xmm0
+//  movdqu [rcx],xmm0
+//  movdqu [rcx+16],xmm0
+//  movdqu [rcx+32],xmm0
+//  movdqu [rcx+48],xmm0
+//  bts [rcx],edx
 //  FillChar(Self, SizeOf(TSlice), 0);
 //  Self.SetBit(index);
 end;
@@ -5413,12 +5421,12 @@ class function TSliverHelper.NS(const North, South: TSlice; out Changed: TSliver
   //RDX =South: PSlice
   //R8 = @Changed: PSliverChanges ((scUnchanged=0, scChanged=1, scInvalid=3));
   //RAX = Result: TSliver (as Int64)
-begin
-  Result:= AVXGENERATE_TSLIVERHELPER_NS(North, South, Changed);
-end;
-//asm
-//  JMP AVXGENERATE_TSLIVERHELPER_NS
+//begin
+//  Result:= AVXGENERATE_TSLIVERHELPER_NS(North, South, Changed);
 //end;
+asm
+  JMP AVXGENERATE_TSLIVERHELPER_NS
+end;
 ////  // First take the north slice and remove pixels 0,1,2
 ////  for i:= 0 to 7 do begin
 ////    // Remove pixel 012 by collapsing every byte into a bit.
@@ -5532,9 +5540,14 @@ end;
 
 
 class function TSliverHelper.EW(const East, West: TSlice; out Changed: TSliverChanges): TSliver;
+begin
+  //AVXGENERATE_TEST;
+  Result:= AVXGENERATE_TSLIVERHELPER_EW(East, West, Changed);
+end;
 //asm
 //  jmp AVXGENERATE_TSLIVERHELPER_EW
 //end;
+(*
 const
   Mask: array[0..15] of byte = ($F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0);
   CollectBytes: array[0..15] of byte =  (0,2,4,6,8,10,12,14,0,2,4,6,8,10,12,14);
@@ -5712,6 +5725,7 @@ asm
         lea edx,[edx+ecx*2]   //Add W to the status.
         mov [r8],dl           //save the status
 end;
+(**)
 
 
 function TSliverHelper.SlowWest: TSlice;
@@ -5740,6 +5754,12 @@ begin
 end;
 
 function TSliverHelper.West: TSlice;
+asm
+  jmp TSliverHelper_West
+end;
+//begin
+//  result:= TSliverHelper_West(@Self);//: TSlice;
+(*
 const
   DoubleNibbles: array[0..15] of byte = (0,1*17,2*17,3*17,4*17,5*17,6*17,7*17,8*17,9*17,10*17,11*17,12*17,13*17,14*17,15*17);
   ShuffleMask: array[0..15] of byte = (0,8,1,9,2,10,3,11,4,12,5,13,6,14,7,15);
@@ -5769,8 +5789,9 @@ asm
   movdqu [rdx+16],xmm2
   movdqu [rdx+32],xmm1
   movdqu [rdx+48],xmm2
-end;
 
+end;
+  (**)
 
 function TSliverHelper.SlowNorth: TSlice;
 var
@@ -5885,7 +5906,10 @@ begin
 end;
 
 function TSliverHelper.East: TSlice;
-const
+asm
+  jmp TSliverHelper_East;
+end;
+(*const
   DoubleBytes: array[0..15] of byte = (0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7);
 asm
   //RCX = @self
@@ -5913,7 +5937,7 @@ asm
   movdqu [rdx+16],xmm1
   movdqu [rdx+32],xmm2
   movdqu [rdx+48],xmm3
-end;
+end; (**)
 
 function TSliverHelper.SlowSouth: TSlice;
 var
@@ -5932,12 +5956,18 @@ asm
   // This means copying the pattern 8 times
   //RCX = @self
   //RDX = @Result
-  movq xmm0,[rcx]
-  movlhps xmm0,xmm0
-  movdqu [rdx],xmm0
-  movdqu [rdx+16],xmm0
-  movdqu [rdx+32],xmm0
-  movdqu [rdx+48],xmm0
+//  movq xmm0,[rcx]
+//  movlhps xmm0,xmm0
+//  movdqu [rdx],xmm0
+//  movdqu [rdx+16],xmm0
+//  movdqu [rdx+32],xmm0
+//  movdqu [rdx+48],xmm0
+db  $c5,$fa,$7e,$01             //vmovq  xmm0,QWORD PTR [rcx]
+db  $c5,$f8,$16,$c0             //vmovlhps xmm0,xmm0,xmm0
+db  $c5,$fa,$7f,$02             //vmovdqu XMMWORD PTR [rdx],xmm0
+db  $c5,$fa,$7f,$42,$10         //vmovdqu XMMWORD PTR [rdx+0x10],xmm0
+db  $c5,$fa,$7f,$42,$20         //vmovdqu XMMWORD PTR [rdx+0x20],xmm0
+db  $c5,$fa,$7f,$42,$30         //vmovdqu XMMWORD PTR [rdx+0x30],xmm0
 end;
 
 { TLookupTable }
@@ -6477,7 +6507,8 @@ begin
   Assert((SizeX * SizeY) >= 1);
   FSizeX:= SizeX;
   FSizeY:= SizeY;
-  SetLength(FData, SizeX * SizeY);
+  //SetLength(FData, SizeX * SizeY);
+  {TODO -oJB -cTGrid.Create : Remove the zero fill}
   //FillChar(FData[0], SizeOf(TSlice) * SizeX * SizeY, #0);
   FActive:= TActiveSlice.Create(SizeX, SizeY);
 
@@ -6497,7 +6528,7 @@ begin
   Count:= FSizeX * FSizeY;
   if (Count = 0) then exit;
   Move(Self.FData[0], Result.FData[0], Count * SizeOf(TSlice));
-  //Result.FActive:= Self.FActive;
+  Result.FActive:= Self.FActive;
 end;
 
 procedure TGrid.Overwrite(var GridToBeOverwritten: TGrid);
@@ -6699,6 +6730,7 @@ label
 begin
   x:= IndexStart mod FSizeX;
   y:= IndexStart div FSizeX;
+  ChangeCount:= 0;
   goto Start;
   repeat
     ChangeCount:= 0;
@@ -6982,7 +7014,7 @@ constructor TGrid.TGridEnumerator.Create(Grid: PGrid);
 begin
   FParent:= Grid;
   FIndex:= -1;
-  FMax:= Length(Grid^.FData);
+  FCount:= Grid.SizeX * Grid.SizeY;
 end;
 
 function TGrid.TGridEnumerator.GetCurrent: PSlice;
@@ -6993,7 +7025,7 @@ end;
 function TGrid.TGridEnumerator.MoveNext: boolean;
 begin
   Inc(FIndex);
-  Result:= (FIndex < FMax);
+  Result:= (FIndex < FCount);
 end;
 
 { TSliceHelper }
@@ -7342,7 +7374,6 @@ end;
 procedure TActiveSlice.Limit(const Bounds: TRect);
 begin
   //block off all the bits that fall outside the valid range
-  var Index:= 0;
   for var i := 0 to FCount-1 do begin
     var x:= i mod FSizeX;
     var y:= i div FSizeX;
