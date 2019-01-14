@@ -124,7 +124,6 @@
         <DCC_Inlining>auto</DCC_Inlining>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <DCC_IOChecking>false</DCC_IOChecking>
-        <DCC_Optimize>true</DCC_Optimize>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <DCC_GenerateStackFrames>false</DCC_GenerateStackFrames>
         <VerInfo_Keys>CompanyName=;FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProductVersion=1.0.0.0;Comments=;ProgramID=com.embarcadero.$(MSBuildProjectName);FileDescription=$(MSBuildProjectName);ProductName=$(MSBuildProjectName)</VerInfo_Keys>
@@ -161,14 +160,13 @@
                     <Source Name="MainSource">Project2.dpr</Source>
                 </Source>
                 <Excluded_Packages>
-                    <Excluded_Packages Name="$(BDSBIN)\dclbindcomp260.bpl">Embarcadero LiveBindings Components</Excluded_Packages>
-                    <Excluded_Packages Name="$(BDSBIN)\dclbindcompfmx260.bpl">Embarcadero LiveBindings Components FireMonkey</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dcltethering260.bpl">Embarcadero - Tethering Component Editors</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dclmlwiz260.bpl">Embarcadero Markup Language Wizards</Excluded_Packages>
-                    <Excluded_Packages Name="$(BDSBIN)\dclbindcompvcl260.bpl">Embarcadero LiveBindings Components VCL</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dclCloudService260.bpl">Embarcadero Cloud management components</Excluded_Packages>
-                    <Excluded_Packages Name="$(BDSBIN)\dclBindCompFireDAC260.bpl">LiveBinding Expression Components FireDac</Excluded_Packages>
-                    <Excluded_Packages Name="$(BDSBIN)\dclbindcompdbx260.bpl">LiveBindings Expression Components DbExpress</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\DataExplorerService260.bpl">Data Explorer Reusable Services</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\DataExplorerFireDACPlugin260.bpl">FireDAC Data Explorer Integration</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\DataExplorerDBXPlugin260.bpl">DBExpress Data Explorer Integration</Excluded_Packages>
+                    <Excluded_Packages Name="$(BDSBIN)\DataExplorerDBXPluginInt260.bpl">DBExpress InterBase Data Explorer Integration</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dcloffice2k260.bpl">Microsoft Office 2000 Sample Automation Server Wrapper Components</Excluded_Packages>
                     <Excluded_Packages Name="$(BDSBIN)\dclofficexp260.bpl">Microsoft Office XP Sample Automation Server Wrapper Components</Excluded_Packages>
                 </Excluded_Packages>
