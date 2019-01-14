@@ -9,7 +9,7 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.Grids, Vcl.ComCtrls,
   JvComponentBase, JvAppStorage, JvAppRegistryStorage, System.Win.TaskbarCore,
   Vcl.Taskbar, System.Actions, Vcl.ActnList, Vcl.PlatformDefaultStyleActnCtrls,
-  Vcl.ActnMan, Universe;
+  Vcl.ActnMan, Universe, OtlCommon, OtlParallel, OtlEventMonitor;
 
 const
   cStanding = true; //deprecated;
@@ -306,6 +306,12 @@ type
     ///  Fill the slice with all zeros
     /// </summary>
     procedure Clear;
+    /// <summary>
+    ///  Reverse the left-right order of a slice
+    /// </summary>
+    function ReverseLeftRight: TSlice;
+
+
   {$IFDEF TESTINSIGHT} public {$ELSE}
   private {$ENDIF}
     case integer of
@@ -487,6 +493,7 @@ type
   end;
 
 type
+  PLookupTable = ^TLookupTable;
   /// <summary>
   ///  A -compressed- lookup table
   ///  The known lookup table has 2^25 entries, generating 1 slice for every future 5x5 bitmap.
@@ -561,6 +568,10 @@ type
     ///  We can recreate a close approximation of the slice data, save this to disk.
     /// </summary>
     procedure SaveSliceData(const Filename: string; const SliceData: TArray<TSlice>);
+    /// <summary>
+    ///  Takes a lookup table and reverses the left to right order of all items.
+    /// </summary>
+    procedure ReverseLeftToRight;
   public
     procedure LoadMainIndex(const Filename: string);
     procedure LoadMainData(const Filename: string);
@@ -771,8 +782,8 @@ type
     ///  Is the grid free of invalid slices?
     /// </summary>
     FIsValid: boolean;
-    //FData: TArray<TSlice>;
-    FData: array[0..255] of TSlice;  //to be replaced by a variable size structure later
+    FData: TArray<TSlice>;
+    //FData: array[0..255] of TSlice;  //to be replaced by a variable size structure later
     function GetSlice(const Coordinate: TPoint): TSlice; overload; inline;
     procedure SetSlice(const Coordinate: TPoint; const Value: TSlice); overload; inline;
     function GetSlice(x,y: integer): TSlice; overload; inline;
@@ -789,7 +800,10 @@ type
     ///  reject slices with coordinates outside those of the rect.
     /// </summary>
     function SliverSolve(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function SliverSolveReverse(x, y: integer; const MinMax: TRect): TSliverChanges;
+
     function SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function SliverSolveReverseOld(x, y: integer; const MinMax: TRect): TSliverChanges;
     /// <summary>
     ///  for (x=Min;x<Max;x++) {for (y=Min;y<Max;y++) {SliverSolve(x,y,Max)}}
     ///  for (x=Max;x>Min;x++) {for (y=Max;y<Min;y++) {SliverSolve(x,y,Max)}}
@@ -846,9 +860,9 @@ type
     ///  This is step 1 in the solver.
     /// </summary>
     function GridSolve: TSliverChanges; overload;
+    function GridSolve(const Bounds: TRect): TSliverChanges; overload;
     function GridSolveOld(const Bounds: TRect): TSliverChanges; overload;
     function GridSolveOld(const Bounds: TRect; IndexStart: integer): TSliverChanges; overload;
-    function GridSolve(const Bounds: TRect): TSliverChanges; overload;
     /// <summary>
     ///  Step 1: find the slice with the lowest popcount, starting from StartPoint
     ///  Step 2: explore every variantion thereof, only keep the grids that do not
@@ -1090,6 +1104,11 @@ type
     Button1: TButton;
     BtnValidateCompressedLookupTable: TButton;
     BtnOld_SolveAndTime: TButton;
+    TabSheet6: TTabSheet;
+    BtnSearchGoE: TButton;
+    MemoGoE_solution: TMemo;
+    OmniEventMonitor1: TOmniEventMonitor;
+    BtnReverseLookup: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1139,6 +1158,8 @@ type
     procedure Button1Click(Sender: TObject);
     procedure BtnValidateCompressedLookupTableClick(Sender: TObject);
     procedure BtnOld_SolveAndTimeClick(Sender: TObject);
+    procedure BtnSearchGoEClick(Sender: TObject);
+    procedure BtnReverseLookupClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -1159,8 +1180,13 @@ type
     {$HINTS ON}
     procedure CreateLookupUsingGridSolver(ThreadIndex, ThreadCount: integer; var data: TArray<TSlice>);
     procedure InitWithPattern(const Pattern: string);
+    procedure EnableAllCPUCores;
+    procedure ReportSolution(NW, NE, SW, SE: integer);
   public
     LookupTable: TLookupTable;
+    CountsTable: TArray<Int64>;
+    CountsIndex: TArray<integer>;
+    GoESolutions: TStringList;
     function FoldRemaining(Offset: TOffset; UnknownMask, KnownMask: integer; Filter: boolean = false): TSlice;
   end;
 
@@ -1189,7 +1215,7 @@ procedure Move(const source; var Dest; Size: NativeInt);
    //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\AVXGenerate.o'}
    //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\AVX_Lib.dll'}
 const
-  AVXlib = 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\AVX_lib.dll';
+  AVXlib = 'AVX_lib.dll';
 
 function AVXGENERATE_TSLIVERHELPER_NS(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external AVXlib name 'TSliverHelper_NS';
 function AVXGENERATE_TSLIVERHELPER_EW(const [ref] North, South: TSlice; out Status: TSliverChanges): TSliver; external AVXlib name 'TSliverHelper_EW';
@@ -1895,90 +1921,98 @@ end;
 // meaning it will be processed in the next sweep.
 // Changes to the center trigger updates in those neighbors that have already been
 // processed.
+// Solve the given sliver with its neighbors to the East and South
+// Returns the status of any changes
 function TGrid.SliverSolve(x, y: integer; const MinMax: TRect): TSliverChanges;
-type
-  TNeighbor = (nvCenter, nvN,nvS,nvE,nvW);
-  TNeighbors = set of TNeighbor;
 var
   Sliver: TSliver;
-  ResultA: TSliverChanges;
-begin
-  var SizeX:= Self.FSizeX;
-  var IndexCenter:= (y * SizeX) + x;
-  var NeighborsToUpdate: TNeighbors:= [];  //Keep track of the neighbors previously processed
-  //CE - The first update, we don't care about center changes here.
-  if (x < MinMax.Right) then begin
-    var IndexEast:= IndexCenter + 1;
-    Sliver:= TSliver.EW(Self[IndexEast], Self[IndexCenter], ResultA);
-    //Only forward changes if there is a change (this saves about 10-15% in run time).
-    if ResultA.WestChanged then begin
-      Self[IndexCenter]:= Self[IndexCenter] and Sliver.West;
-      Include(NeighborsToUpdate, nvCenter);
-    end;
-    if ResultA.EastChanged then begin
-      Self[IndexEast]:= Self[IndexEast] and Sliver.East;
-      Include(NeighborsToUpdate, nvE);
-    end;
-    Result:= ResultA;
-    if (ResultA.IsInvalid) then Exit;
-  end else Result:= TSliverChanges.Unchanged; { handle CE }
-  // CS
-  if (y < MinMax.Bottom) then begin
-    var IndexSouth:= IndexCenter + FSizeX;
-    Sliver:= TSliver.NS(Self[IndexCenter], Self[IndexSouth], ResultA);
-    if ResultA.NorthChanged then begin
-      Self[IndexCenter]:= Self[IndexCenter] and Sliver.North;
-      NeighborsToUpdate:= NeighborsToUpdate + [nvE, nvCenter]; //This change needs to be fed-back to the E
-    end;
-    if ResultA.SouthChanged then begin
-      Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
-      Include(NeighborsToUpdate, nvS);
-    end;
-    Result:= Result or ResultA;
-    if (ResultA.IsInvalid) then Exit;
-  end; { handle CS }
-  //WC
-  if (x > MinMax.Left) then begin
-    var IndexWest:= IndexCenter - 1;
-    Sliver:= TSliver.EW(Self[IndexCenter], Self[IndexWest], ResultA);
-    //Only forward changes if there is a change (this saves about 10-15% in run time).
-    if ResultA.WestChanged then begin
-      Self[IndexWest]:= Self[IndexWest] and Sliver.West;
-      Include(NeighborsToUpdate, nvW);
-    end;
-    if ResultA.EastChanged then begin
-      Self[IndexCenter]:= Self[IndexCenter] and Sliver.East;
-      NeighborsToUpdate:= NeighborsToUpdate + [nvE, nvS, nvCenter];
-    end;
-    Result:= Result or ResultA;
-    if (ResultA.IsInvalid) then Exit;
-  end; { handle CE }
-  // NC
-  if (y > MinMax.Top) then begin
-    var IndexNorth:= IndexCenter - FSizeX;
-    Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexCenter], ResultA);
-    if ResultA.NorthChanged then begin
-      Self[IndexNorth]:= Self[IndexNorth] and Sliver.North;
-      //Include(NeighborsToUpdate, nvN);
-      Self.FActive.Activate(IndexNorth);
-    end else Self.FActive.Reset(IndexNorth);
-    if ResultA.SouthChanged then begin
-      Self[IndexCenter]:= Self[IndexCenter] and Sliver.South;
-      NeighborsToUpdate:= NeighborsToUpdate + [nvE, nvS, nvW, nvCenter];
-    end;
-    Result:= Result or ResultA;
-    if ResultA.IsInvalid then exit;
-  end; { handle NS }
+  IndexCenter: integer;
 
-  //if (y > MinMax.Top) then FActive.Update(IndexCenter-FSizeX, nvN in NeighborsToUpdate);
-  //North is the last slice to update, it already has any missed updates due to
-  //changes in the center slice.
-  //We only do updates to the 3 first neighbors here, because although these neighbors
-  //may not have changed themselves, a later change in the center slice may affect them
-  if not(nvCenter in NeighborsToUpdate) then FActive.Reset(IndexCenter);
-  if (y < MinMax.Bottom) then FActive.Update(IndexCenter+FSizeX, nvS in NeighborsToUpdate);
-  if (x < MinMax.Right)  then FActive.Update(IndexCenter+1,      nvE in NeighborsToUpdate);
-  if (x > MinMax.Left)   then FActive.Update(IndexCenter-1,      nvW in NeighborsToUpdate);
+  function DoEW: TSliverChanges;
+  begin
+    if x < (MinMax.Right) then begin
+      var IndexEast:= IndexCenter+1;
+      //If there is a problem the sliver will be invalid.
+      Sliver:= TSliver.EW(Self[IndexEast], Self[IndexCenter], Result);
+      if Result.WestChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.West;
+      if Result.EastChanged then Self[IndexEast]:= Self[IndexEast] and Sliver.East;
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y < (MinMax.Bottom) then begin
+      var IndexSouth:= IndexCenter + FSizeX;
+      Sliver:= TSliver.NS(Self[IndexCenter], Self[IndexSouth], Result);
+      if Result.SouthChanged then Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
+      if Result.NorthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.North;
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+//  Result:= ResultNS or ResultEW;
+end;
+
+// Solve the given sliver with its neighbors to the East and South
+// Returns the status of any changes
+function TGrid.SliverSolveReverse(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  Sliver: TSliver;
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if x > (MinMax.Left) then begin
+      var IndexWest:= IndexCenter-1;
+      //If there is a problem the sliver will be invalid.
+      Sliver:= TSliver.EW(Self[IndexCenter], Self[IndexWest], Result);
+      if Result.WestChanged then Self[IndexWest]:= Self[IndexWest] and Sliver.West;
+      if Result.EastChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.East;
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y > (MinMax.top) then begin
+      var IndexNorth:= IndexCenter - FSizeX;
+      Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexCenter], Result);
+      if Result.SouthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.South;
+      if Result.NorthChanged then Self[IndexNorth]:= Self[IndexNorth] and Sliver.North;
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+//  Result:= ResultNS or ResultEW;
 end;
 
 // Solve the given sliver with its neighbors to the East and South
@@ -2028,6 +2062,54 @@ begin
 //  Result:= ResultNS or ResultEW;
 end;
 
+// Solve the given sliver with its neighbors to the East and South
+// Returns the status of any changes
+function TGrid.SliverSolveReverseOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  Sliver: TSliver;
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if x > (MinMax.Left) then begin
+      var IndexWest:= IndexCenter-1;
+      //If there is a problem the sliver will be invalid.
+      Sliver:= TSliver.EW(Self[IndexCenter], Self[IndexWest], Result);
+      if Result.WestChanged then Self[IndexWest]:= Self[IndexWest] and Sliver.West;
+      if Result.EastChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.East;
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y > (MinMax.top) then begin
+      var IndexNorth:= IndexCenter - FSizeX;
+      Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexCenter], Result);
+      if Result.SouthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.South;
+      if Result.NorthChanged then Self[IndexNorth]:= Self[IndexNorth] and Sliver.North;
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+//  Result:= ResultNS or ResultEW;
+end;
+
+
 
 
 function TGrid.DoASliverRun: TSliverChanges;
@@ -2041,7 +2123,7 @@ begin
   ChangeCount:= 0;
   for x:= 0 to FSizeX-1 do begin
     for y:= 0 to FSizeY-1 do begin
-      Result:= Self.SliverSolve(x, y, Rect(0,0,15,15));
+      Result:= Self.SliverSolveOld(x, y, Rect(0,0,15,15));
       ChangeCount:= ChangeCount + Result;
       if (Result.IsInvalid) then Exit;
     end; { for y }
@@ -2050,7 +2132,7 @@ begin
   ChangeCount:= 0;
   for x:= FSizeX-1 downto 0 do begin
     for y:= FSizeY-1 downto 0 do begin
-      Result:= Self.SliverSolve(x, y, Rect(0,0,15,15));
+      Result:= Self.SliverSolveOld(x, y, Rect(0,0,15,15));
       ChangeCount:= ChangeCount + Result;
       if (Result.IsInvalid) then Exit;
     end; { for y }
@@ -2315,6 +2397,11 @@ begin
   FS:= TFileStream.Create(FileSaveDialog1.Filename, fmCreate);
   FS.Write(TBytes(NewLookup), Length(NewLookup) * SizeOf(TSlice));
   FS.Free;
+end;
+
+procedure TForm2.BtnReverseLookupClick(Sender: TObject);
+begin
+  Self.LookupTable.ReverseLeftToRight;
 end;
 
 //deprecated
@@ -3792,6 +3879,19 @@ begin
   Result := 1 shl (ProcessorIndex);
 end;
 
+procedure TForm2.EnableAllCPUCores;
+var
+  ProcAffinityMask: DWORD_PTR;
+  SystemAffinityMask: DWORD_PTR;
+  a: integer;
+begin
+  var ThreadCount:= System.CpuCount;
+  GetProcessAffinityMask(GetCurrentProcess, ProcAffinityMask, SystemAffinityMask);
+  longbool(a):= SetProcessAffinityMask(GetCurrentProcess, (1 shl ThreadCount)-1);
+  if (a=0) then RaiseLastOSError;
+  GetProcessAffinityMask(GetCurrentProcess, ProcAffinityMask, SystemAffinityMask);
+end;
+
 //Start up as many threads as the CPU has cores
 //And try and recreate the 7x7->5x5->3x3 lookup table using
 //1x1          ->3x3   ->5x5                    ->3x3
@@ -3806,16 +3906,9 @@ var
   CurrentProcessor: integer;
   i,a: integer;
   Done: boolean;
-  ProcAffinityMask: DWORD_PTR;
-  SystemAffinityMask: DWORD_PTR;
-
 begin
   SetLength(NewLookup, 1 shl 25);
   ThreadCount:= System.CpuCount;
-  GetProcessAffinityMask(GetCurrentProcess, ProcAffinityMask, SystemAffinityMask);
-  longbool(a):= SetProcessAffinityMask(GetCurrentProcess, (1 shl ThreadCount)-1);
-  if (a=0) then RaiseLastOSError;
-  GetProcessAffinityMask(GetCurrentProcess, ProcAffinityMask, SystemAffinityMask);
   SetLength(Threads, ThreadCount);
   CurrentProcessor:= GetCurrentProcessorNumber;
   a:= 0;
@@ -3915,8 +4008,9 @@ begin
   // Get the slice data from the grid, by looking it up in the lookup table
   for var x:= 0 to 9 do begin
     for var y:= 0 to 9 do begin
-      //MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x, y, LookupTable, oCenter);
+      //MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
       MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
+      //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
       StringGrid3.Cells[x+3, y+3]:= '';
     end;
   end;
@@ -3926,59 +4020,6 @@ begin
   var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;
-(*
-  var Changes: TSliverChanges;
-  var Clone:= TGrid.Create(MySlices);
-  repeat
-    Changes:= MySlices.DoASliverRun;
-  until (Changes.IsInvalid) or (Changes.IsUnchanged);
-  //Find the slice with the smallest statecount
-  var Min:= 513; //make sure we always find something
-  var Max:= 0;
-  var MinSlice: PSlice:= nil;
-  var ValidStates: integer;
-  var Valid:= TGrid.Create(MySlices); //Create an empty grid.
-  repeat
-    var UpdateMySlices:= false;
-    for var Slice in MySlices do begin
-      var Count:= Slice.PopCount;
-      if (Count < Min) and (Count > 1) then begin
-        MinSlice:= Slice;
-        Min:= Slice.PopCount;
-      end;
-      if Count > Max then Max:= Count;
-    end;
-    ValidStates:= min;
-    if Max = 1 then break; //We have a unique solution
-    if Min > 0 then begin //We have to do some exploring
-      var Index:= -1;
-      MySlices.Overwrite(Clone);
-      Valid.Clear;
-      for var i:= 1 to Min do begin
-        //Slice points to MySlices, change MySlices and use the clone to put things back later
-        Index:= MinSlice.NextSetBit(Index);
-        MinSlice.ForceSingleBit(Index);
-        repeat
-          Changes:= MySlices.DoASliverRun;
-        until (Changes.IsInvalid) or (Changes.IsUnchanged);
-        if Changes.IsUnchanged then begin
-          //Add the grid to the conjunction of valid grids.
-
-          Valid:= Valid or MySlices;
-          UpdateMySlices:= true;
-        end else Dec(ValidStates);
-        Clone.Overwrite(MySlices); //Restore MySlices, do not distrub the MinSlice pointer.
-      end; {for i}
-      if UpdateMySlices then begin
-        Valid.Overwrite(MySlices);
-        repeat
-          Changes:= MySlices.DoASliverRun;
-        until (Changes.IsInvalid) or (Changes.IsUnchanged);
-        if (Valid = MySlices) then break; //Stop if we cannot make any more improvements
-      end;
-    end; {if work to be done}
-  until (ValidStates = 0);
-  *)
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
@@ -4018,8 +4059,8 @@ begin
   var Timer:= TStopWatch.StartNew;
 
   var Status:= MySlices.GridSolve(Rect(3,3,12,12));
-  DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
-  //if Status.IsValid then Status:= MySlices.GetUniqueSolution;
+  //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolution;
 (*
   var Changes: TSliverChanges;
   var Clone:= TGrid.Create(MySlices);
@@ -4132,6 +4173,82 @@ begin
   Result:= NewLayout;
 end;
 
+procedure TForm2.ReportSolution(NW, NE, SW, SE: integer);
+begin
+  MemoGoE_solution.Lines.Add('NWSESWNE:'+NW.ToString+SE.ToString+SW.ToString+NE.ToString);
+  MemoGoE_solution.Lines.SaveToFile('GoE_solutions.txt');
+end;
+
+procedure TForm2.BtnSearchGoEClick(Sender: TObject);
+begin
+  EnableAllCPUCores;
+  BtnSearchGoE.Enabled:= false;
+
+
+  if Length(CountsTable) = 0 then begin
+    if not(FileOpenDialog1.Execute) then exit;
+    var FS:= TFileStream.Create(FileOpenDialog1.Filename, fmOpenRead);
+    Assert(FS.Size mod SizeOf(Int64) = 0);
+    Assert(FS.Size = (1 shl 25)*SizeOf(int64));
+    SetLength(CountsTable, 1 shl 25);
+    FS.Read64(TBytes(CountsTable),0,FS.Size);
+    SetLength(CountsIndex, 1 shl 25);
+    for var i:= 0 to (1 shl 25)-1 do begin
+      CountsIndex[i]:= i;
+    end;
+    TArray.Sort<integer>(CountsIndex, TDelegatedComparer<integer>.Construct(
+      function(const Left, Right: integer): integer
+      begin
+        if CountsTable[Left] > CountsTable[Right] then Exit(1);
+        if CountsTable[Left] < CountsTable[Right] then Exit(-1);
+        Result:= 0;
+      end
+    ));
+  end;
+  Parallel.Async(procedure begin
+    var ZeroSlice:= LookupTable[0,oCenter];
+    var OneSlice:= not(ZeroSlice);
+    Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+      var Grid:= TGrid.Create(10,10);
+    //for var NW:= 0 to 100 do begin
+      for var SW:= 0 to 100 do begin
+        TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+        for var SE:= 0 to 100 do begin
+          for var NE:= 0 to 100 do begin
+
+            var iNW:= CountsIndex[NW];
+            var iSE:= CountsIndex[SE];
+            var iSW:= CountsIndex[SW];
+            var iNE:= CountsIndex[NE];
+            //Now get the pixels from the i's
+            for var y:= 0 to 4 do begin
+              for var x:= 4 downto 0 do begin
+                var Mask:= (1 shl (4-x)) shl (y * 5);
+                if ((Mask and iNW) <> 0) then Grid[x,y]:= OneSlice else Grid[x,y]:= ZeroSlice;
+                if ((Mask and iNE) <> 0) then Grid[x+5,y]:= OneSlice else Grid[x+5,y]:= ZeroSlice;
+                if ((Mask and iSW) <> 0) then Grid[x,y+5]:= OneSlice else Grid[x,y+5]:= ZeroSlice;
+                if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= OneSlice else Grid[x+5,y+5]:= ZeroSlice;
+              end; {for x}
+            end; {for y}
+            //The grid is set, let's solve it.
+            if Grid.GridSolveOld(Rect(0,0,9,9)).IsInvalid then begin
+              //We have found a GoE.
+              TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+            end else begin
+              //Not yet, keep looking
+              if Grid.GetUniqueSolutionOld.IsInvalid then begin
+                //We have found a GoE
+                TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+              end;
+            end;
+          end; {for NE}//end); {parallel.for}
+        end; {for SE}
+      end; {for SW}
+    end); {for parallel NW}
+    TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
+  end); //TTask.run
+end;
+
 //deprecated
 procedure TForm2.BtnSolveCounterClick(Sender: TObject);
 begin
@@ -4165,7 +4282,7 @@ procedure TForm2.InitWithPattern(const Pattern: string);
 begin
   var SG:= StringGrid1;
   for var x:= 0 to SG.ColCount-1 do for var y:= 0 to SG.RowCount-1 do begin
-    SG.Cells[x,y]:= '?';
+    SG.Cells[x,y]:= ' ';
   end;
   var x:= 5;
   var y:= 5;
@@ -4202,16 +4319,16 @@ end;
 //Hard GoE
 procedure TForm2.InitWithGoE;
 const
-  Pattern: string = '?X-XXX-X??,' +
-                    '?-X-X-X--X,' +
+  Pattern: string = '-X-XXX-X--,' +
+                    '--X-X-X--X,' +
                     'X-XXX--XX-,' +
                     '-X-XXXXX-X,' +
                     'X--X--XXXX,' +
                     'XXXX--X--X,' +
                     'X-XXXXX-X-,' +
                     '-XX--XXX-X,' +
-                    'X--X-X-X-?,' +
-                    '??X-XXX-X?.';
+                    'X--X-X-X--,' +
+                    '--X-XXX-X-.';
 begin
   InitWithPattern(Pattern);
 end;
@@ -4773,6 +4890,24 @@ begin
   FillChar(Self, SizeOf(Self), #0);
   for i:= 0 to 511 do begin
     if Original.GetBit(i) then Self.SetBit(Reordering[i]);
+  end;
+end;
+
+function TSlice.ReverseLeftRight: TSlice;
+begin
+  //The are 512 bits in a slice, thus every bit has a 9 bit index
+  //Of that index, take bits 0 and 2 and swap them, same for bits 3 and 5 as well as 6 and 8
+  Result:= TSlice.FullyEmpty;
+  var Index:= -1;
+  while Index < 512 do begin
+    Index:= Self.NextSetBit(Index);
+    var NewIndex:= Index;
+    //Now pick the index apart and get the transformed index
+    if (NewIndex and (1+4)) in [1,4] then NewIndex:= NewIndex xor (1+4);
+    if (NewIndex and (8+32)) in [8,32] then NewIndex:= NewIndex xor (8+32);
+    var a:= (NewIndex and (64+256));
+    if (a = 64) or (a = 256) then NewIndex:= NewIndex xor (64+256);
+    Result.SetBit(NewIndex);
   end;
 end;
 
@@ -5540,13 +5675,13 @@ end;
 
 
 class function TSliverHelper.EW(const East, West: TSlice; out Changed: TSliverChanges): TSliver;
-begin
-  //AVXGENERATE_TEST;
-  Result:= AVXGENERATE_TSLIVERHELPER_EW(East, West, Changed);
-end;
-//asm
-//  jmp AVXGENERATE_TSLIVERHELPER_EW
+//begin
+//  //AVXGENERATE_TEST;
+//  Result:= AVXGENERATE_TSLIVERHELPER_EW(East, West, Changed);
 //end;
+asm
+  jmp AVXGENERATE_TSLIVERHELPER_EW
+end;
 (*
 const
   Mask: array[0..15] of byte = ($F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0,$F0);
@@ -6141,6 +6276,54 @@ begin
   LoadSliceData(Filename, FUnknownData);
 end;
 
+procedure TLookupTable.ReverseLeftToRight;
+type
+  PLookupTable = ^TLookupTable;
+var
+  NewIndex: TArray<integer>;
+  a: array[0..4] of integer;
+  S: PLookupTable;
+begin
+  S:= @Self;
+  Parallel.For(0, Length(FData)-1).Execute(procedure(i: integer) begin
+    S.FData[i]:= S.FData[i].ReverseLeftRight;
+  end); {for i}
+  Parallel.For(0, Length(FUnknownData)-1).Execute(procedure(i: integer) begin
+    S.FUnknownData[i]:= S.FUnknownData[i].ReverseLeftRight;
+  end); {for i}
+  //Next work on the index.
+  //The elements of the index must also be reversed left to right.
+  SetLength(NewIndex, 1 shl 25);
+  for var i := 0 to ((1 shl 25)-1) do begin
+    var b:= 0;
+    for var j:= 0 to 4 do begin
+      a[j]:= (i shr (j*5)) and 31;
+      if (a[j] and (1+16)) in [1,16] then a[j]:= a[j] xor (1+16);
+      if (a[j] and (2+8)) in [2,8] then a[j]:= a[j] xor (2+8);
+      b:= b or (a[j] shl(j*5));
+    end;
+    NewIndex[b]:= FIndex[i];
+  end; {for i}
+  var TestIndex: TArray<integer>;
+  SetLength(TestIndex, 1 shl 25);
+  for var i := 0 to ((1 shl 25)-1) do begin
+    var b:= 0;
+    for var j:= 0 to 4 do begin
+      a[j]:= (i shr (j*5)) and 31;
+      if (a[j] and (1+16)) in [1,16] then a[j]:= a[j] xor (1+16);
+      if (a[j] and (2+8)) in [2,8] then a[j]:= a[j] xor (2+8);
+      b:= b or (a[j] shl(j*5));
+    end;
+    TestIndex[b]:= NewIndex[i];
+  end; {for i}
+  for var i := 0 to ((1 shl 25)-1) do begin
+    if TestIndex[i] <> FIndex[i] then begin
+      Assert(TestIndex[i] = FIndex[i], 'element '+i.ToString+':soll='+FIndex[i].ToString+',ist='+TestIndex[i].ToString);
+    end;
+  end;
+  FIndex:= NewIndex;
+end;
+
 procedure TLookupTable.LoadCornerIndex(const Filename: string);
 begin
   LoadIndex(Filename, FCornerIndex);
@@ -6446,9 +6629,6 @@ begin
   Inc(FUnknownPart);
 end;
 
-
-
-
 { TGrid }
 
 function TGrid.AsBitmap(StartX, StartY: integer; out Spillage: TRect): TGridBitmap;
@@ -6507,10 +6687,10 @@ begin
   Assert((SizeX * SizeY) >= 1);
   FSizeX:= SizeX;
   FSizeY:= SizeY;
-  //SetLength(FData, SizeX * SizeY);
+  SetLength(FData, SizeX * SizeY);
   {TODO -oJB -cTGrid.Create : Remove the zero fill}
   //FillChar(FData[0], SizeOf(TSlice) * SizeX * SizeY, #0);
-  FActive:= TActiveSlice.Create(SizeX, SizeY);
+  //FActive:= TActiveSlice.Create(SizeX, SizeY);
 
   FIsValid:= true;
 end;
@@ -6650,41 +6830,33 @@ begin
   Result:= GridSolve(Rect(0,0,FSizeX-1, FSizeY-1));
 end;
 
+
 function TGrid.GridSolve(const Bounds: TRect): TSliverChanges;
+var
+  x, y: integer;
+  ChangeCount: integer;
 label
   Done;
 begin
-  //Limit the active slices to the bounding box
-  FActive.Limit(Bounds);
   repeat
-    //ChangeCount:= 0;
-    for var Index in FActive do begin
-      Result:= SliverSolve(Index mod FSizeX, Index div FSizeX, Bounds);
-      if Result.IsInvalid then goto Done;
-    end; {while working forward}
-    //FActive.ClearForward; //Too aggresive, leads to incorrect outcomes
-//    for y:= MinY to MaxY do begin
-//      for x:= MinX to MaxX do begin
-//        Result:= SliverSolve(x, y, MaxX, MaxY);
-//        if (Result.IsInvalid) then goto Done;
-//        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
-//      end; { for y }
-//    end; { for x }
-    if (FActive.ActiveCount = 0) then goto Done;
-    //ChangeCount:= 0;
-    for var Index in FActive.Reverse do begin
-      Result:= SliverSolve(Index mod FSizeX, Index div FSizeX, Bounds);
-      if (Result.IsInvalid) then goto Done;
-    end; {while working backward}
-    //FActive.ClearBackward;  //Too aggresive, leads to incorrect outcomes
-//    for y:= MaxY downto MinY do begin
-//      for x:= MaxX downto MinX do begin
-//        Result:= SliverSolve(x, y, MaxX, MaxY);
-//        if (Result.IsInvalid) then goto Done;
-//        ChangeCount:= ChangeCount + Result
-//      end; { for y }
-//    end; { for x }
-  until (FActive.ActiveCount = 0);
+    ChangeCount:= 0;
+    for y:= Bounds.Top to Bounds.Bottom do begin
+      for x:= Bounds.Left to Bounds.Right do begin
+        Result:= SliverSolveOld(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+      end; { for y }
+    end; { for x }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    for y:= Bounds.Bottom downto Bounds.Top do begin
+      for x:= Bounds.Right downto Bounds.Left do begin
+        Result:= SliverSolveReverseOld(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result
+      end; { for y }
+    end; { for x }
+  until (ChangeCount = 0);
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
@@ -6709,7 +6881,7 @@ begin
     ChangeCount:= 0;
     for y:= Bounds.Bottom downto Bounds.Top do begin
       for x:= Bounds.Right downto Bounds.Left do begin
-        Result:= SliverSolveOld(x, y, Bounds);
+        Result:= SliverSolveReverseOld(x, y, Bounds);
         if (Result.IsInvalid) then goto Done;
         ChangeCount:= ChangeCount + Result
       end; { for y }
@@ -6755,7 +6927,7 @@ begin
       x:= Bounds.Right;
       while x >= Bounds.Left do begin
 Start: //32ms (above) vs 29 ms (here), keep the start here.
-        Result:= SliverSolveOld(x, y, Bounds);
+        Result:= SliverSolveReverseOld(x, y, Bounds);
         if (Result.IsInvalid) then goto Done;
         ChangeCount:= ChangeCount + Result;
         Dec(x);
@@ -6766,6 +6938,7 @@ Start: //32ms (above) vs 29 ms (here), keep the start here.
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
+
 
 
 procedure TGrid.GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
@@ -6821,6 +6994,7 @@ begin
   //end;
 end;
 
+
 function TGrid.GetUniqueSolutionOld: TSliverChanges;
 const
   HasUniqueSolution = 513;
@@ -6853,6 +7027,7 @@ begin
     //All alternatives investigated are invalid, there is no solution, return UNSAT.
   Result:= TSliverChanges.Invalid;
 end;
+
 
 
 function TGrid.SpeculativeExploration(Strategy: TExplorationStrategy; const SamplePoint: TPoint): TSliverChanges;

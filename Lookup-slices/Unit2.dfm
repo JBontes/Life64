@@ -269,9 +269,9 @@ object Form2: TForm2
         OnClick = BtnClearGridClick
       end
       object BtnTestLookup0_012: TButton
-        Left = 512
+        Left = 487
         Top = 0
-        Width = 337
+        Width = 138
         Height = 25
         Caption = 'Test lookup0, 012'
         TabOrder = 8
@@ -539,6 +539,15 @@ object Form2: TForm2
         Caption = 'Old_SolveAndTime'
         TabOrder = 22
         OnClick = BtnOld_SolveAndTimeClick
+      end
+      object BtnReverseLookup: TButton
+        Left = 631
+        Top = 0
+        Width = 274
+        Height = 25
+        Caption = 'Reverse lookup left-right'
+        TabOrder = 23
+        OnClick = BtnReverseLookupClick
       end
     end
     object TabSheet2: TTabSheet
@@ -862,6 +871,28 @@ object Form2: TForm2
         OnClick = BtnValidateCompressedLookupTableClick
       end
     end
+    object TabSheet6: TTabSheet
+      Caption = 'Search'
+      ImageIndex = 5
+      object BtnSearchGoE: TButton
+        Left = 104
+        Top = 24
+        Width = 225
+        Height = 25
+        Caption = 'BtnSearchGoE'
+        TabOrder = 0
+        OnClick = BtnSearchGoEClick
+      end
+      object MemoGoE_solution: TMemo
+        Left = 56
+        Top = 80
+        Width = 377
+        Height = 513
+        Lines.Strings = (
+          'MemoGoE_solution')
+        TabOrder = 1
+      end
+    end
   end
   object SGAliveDiff: TStringGrid
     Left = 1318
@@ -996,5 +1027,9 @@ object Form2: TForm2
       ShortCut = 112
       OnExecute = Action_SliverSolveRoundExecute
     end
+  end
+  object OmniEventMonitor1: TOmniEventMonitor
+    Left = 484
+    Top = 107
   end
 end
