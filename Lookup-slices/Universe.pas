@@ -130,6 +130,7 @@ type
     class operator BitwiseXor(const A,B: TUnit): TUnit;
     class operator BitwiseAnd(const A,B: TUnit): TUnit;
     class operator LogicalNot(const A: TUnit): TUnit;
+    procedure Clear;
     case integer of
       1: (b: array[0..MaxBytesPerUnit] of byte);
       2: (w: array[0..(BytesPerUnit div 2)-1] of word);
@@ -284,6 +285,7 @@ type
     function CalculatePtoQ_16_4x4_Blocks(const input: TArray<int64>): Int64;
     function Get4x4(AUnit: pointer; FirstByte: integer): integer;
     function Get2x2(AUnit: pointer; FirstByte: integer): integer;
+    procedure Clear;
   protected
     function CellCount: integer;
     function GetSubNode(index: integer): TAbstractNode; override;
@@ -660,6 +662,12 @@ asm
     add rax,r8
     add rdx,8
   jnz @loop
+end;
+
+procedure TCellBlock.Clear;
+begin
+  FillChar(p, SizeOf(p), #0);
+  FillChar(q, SizeOf(q), #0);
 end;
 
 procedure TCellBlock.CoordinateNodeToBitmap(var x, y: integer; DisplayQ: boolean);
@@ -1343,6 +1351,12 @@ class operator TUnit.BitwiseXor(const A, B: TUnit): TUnit;
 begin
   Result.q[0]:= A.q[0] xor B.q[0];
   Result.q[1]:= A.q[1] xor B.q[1];
+end;
+
+procedure TUnit.Clear;
+begin
+  Self.q[0]:= 0;
+  Self.q[1]:= 0;
 end;
 
 procedure TUnit.Display(const BitmapStart: pointer; const LineOffset: integer);

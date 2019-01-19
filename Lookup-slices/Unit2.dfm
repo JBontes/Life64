@@ -105,7 +105,7 @@ object Form2: TForm2
       end
       object BtnProcessSliceLookup: TButton
         Left = 3
-        Top = 48
+        Top = 34
         Width = 169
         Height = 25
         Caption = 'Process slice lookup'
@@ -113,17 +113,17 @@ object Form2: TForm2
         OnClick = BtnProcessSliceLookupClick
       end
       object Memo1: TMemo
-        Left = 8
-        Top = 136
+        Left = 6
+        Top = 157
         Width = 169
-        Height = 457
+        Height = 503
         Lines.Strings = (
           'Memo1')
         TabOrder = 1
       end
       object BtnProcess_7x7_CountLookup: TButton
         Left = 3
-        Top = 17
+        Top = 3
         Width = 169
         Height = 25
         Caption = 'Process 7x7 count lookup'
@@ -192,7 +192,7 @@ object Form2: TForm2
       end
       object BtnAppyLookupTable: TButton
         Left = 487
-        Top = 31
+        Top = 34
         Width = 418
         Height = 25
         Caption = 'Appy lookup table'
@@ -252,7 +252,7 @@ object Form2: TForm2
       end
       object BtnSolveRoundUsingChunks: TButton
         Left = 487
-        Top = 62
+        Top = 64
         Width = 418
         Height = 25
         Caption = 'Solve a round using chunks'
@@ -270,7 +270,7 @@ object Form2: TForm2
       end
       object BtnTestLookup0_012: TButton
         Left = 487
-        Top = 0
+        Top = 3
         Width = 138
         Height = 25
         Caption = 'Test lookup0, 012'
@@ -524,7 +524,7 @@ object Form2: TForm2
       end
       object Button1: TButton
         Left = 3
-        Top = 105
+        Top = 126
         Width = 170
         Height = 25
         Caption = 'SolveAndTime'
@@ -533,7 +533,7 @@ object Form2: TForm2
       end
       object BtnOld_SolveAndTime: TButton
         Left = 3
-        Top = 77
+        Top = 95
         Width = 169
         Height = 25
         Caption = 'Old_SolveAndTime'
@@ -542,12 +542,21 @@ object Form2: TForm2
       end
       object BtnReverseLookup: TButton
         Left = 631
-        Top = 0
+        Top = 3
         Width = 274
         Height = 25
         Caption = 'Reverse lookup left-right'
         TabOrder = 23
         OnClick = BtnReverseLookupClick
+      end
+      object BtnOldNewSolveInLockstep: TButton
+        Left = 3
+        Top = 64
+        Width = 169
+        Height = 25
+        Caption = 'Old_new in lockstep'
+        TabOrder = 24
+        OnClick = BtnOldNewSolveInLockstepClick
       end
     end
     object TabSheet2: TTabSheet
@@ -892,6 +901,15 @@ object Form2: TForm2
           'MemoGoE_solution')
         TabOrder = 1
       end
+      object Btn5x5To3x3_Lookup: TButton
+        Left = 592
+        Top = 24
+        Width = 137
+        Height = 25
+        Caption = 'Make 5x5->3x3 lookup'
+        TabOrder = 2
+        OnClick = Btn5x5To3x3_LookupClick
+      end
     end
   end
   object SGAliveDiff: TStringGrid
@@ -1027,9 +1045,5 @@ object Form2: TForm2
       ShortCut = 112
       OnExecute = Action_SliverSolveRoundExecute
     end
-  end
-  object OmniEventMonitor1: TOmniEventMonitor
-    Left = 484
-    Top = 107
   end
 end
