@@ -67,3 +67,5 @@ __recovery/
 *.stat
 *.dproj
 *.ini
+*.dproj
+*.ini
