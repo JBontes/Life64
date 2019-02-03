@@ -4620,7 +4620,10 @@ begin
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  try
+    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  except {do nothing}
+  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4660,7 +4663,10 @@ begin
 
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  try
+    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  except {do nothing}
+  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4704,7 +4710,10 @@ begin
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  try
+    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  except {do nothing}
+  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
