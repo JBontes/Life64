@@ -879,6 +879,7 @@ type
     procedure SetSlice(x,y: integer; const Value: TSlice); overload; inline;
     function GetSlice(i: integer): TSlice; overload; inline;
     procedure SetSlice(i: integer; const Value: TSlice); overload; inline;
+    function BoundingRect: TRect;
     /// <summary>
     ///  The core of the gridwalker algorithm
     ///  Take two slices (x,y) and (x+1,y) where all coordinates < MaxX <MaxY
@@ -1077,7 +1078,7 @@ type
     property Item[i: integer]: TSlice read GetSlice write SetSlice; default;
   end;
 
-    TDictGrid = record
+  TDictGrid = record
   private
     FSizeX, FSizeY: integer;
     FData: TArray<integer>;   //Every slice in the structure is represented by an index
@@ -1088,6 +1089,7 @@ type
     function GridSolveOld(const Bounds: TRect; IndexStart: integer = -1): TSliverChanges;
     procedure SetItems(x, y: integer; const Value: integer);
     function GetSlicesXY(x, y: integer): PSlice; inline;
+    function BoundingRect: TRect;
   public
     /// <summary>
     ///  initialize a new Grid with dimensions x and y.
@@ -1329,6 +1331,7 @@ type
     procedure EnableAllCPUCores;
     procedure ReportSolution(NW, NE, SW, SE: integer);
     procedure GridSolveLockstep(const Old, New: TGrid);
+    function FindBoundingBox: TRect;
   public
     LookupTable: TLookupTable;
     MiniLookup: TArray<TSlice>;
@@ -2141,15 +2144,15 @@ var
 begin
   ZeroSlice:= LookupTable[oCenter, 0];
   OneSlice:= not(ZeroSlice);
-  if (SG.Cells[col + 2, row + 2] = 'X') then Result:= OneSlice
-  else if (SG.Cells[col + 2, row + 2] = '?') then Result:= TSlice.FullyUnknown
+  if (SG.Cells[col, row] = 'X') then Result:= OneSlice
+  else if (SG.Cells[col, row] = '?') then Result:= TSlice.FullyUnknown
   else Result:= ZeroSlice;
 end;
 
 function FutureGridToPastDictSliceSimple(const SG: TStringGrid; col, row: integer; const LookupTable: TLookupTable): integer;
 begin
-  if (SG.Cells[col + 2, row + 2] = 'X') then Result:= 1
-  else if (SG.Cells[col + 2, row + 2] = '?') then Result:= -1
+  if (SG.Cells[col, row] = 'X') then Result:= 1
+  else if (SG.Cells[col, row] = '?') then Result:= -1
   else Result:= 0;
 end;
 
@@ -2611,7 +2614,7 @@ var
 
   function DoNS: TSliverChanges;
   begin
-    if y > (MinMax.top) then begin
+    if y > (MinMax.Top) then begin
       var IndexNorth:= IndexCenter - FSizeX;
       Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexCenter], Result);
       if Result.SouthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.South;
@@ -4583,7 +4586,51 @@ begin
   GridSolveLockstep(SlicesOld, SlicesNew);
 end;
 
-
+function TForm2.FindBoundingBox: TRect;
+begin
+  var SG:= StringGrid1;
+  Result:= Rect(-1,-1,-1,-1);
+  //Find the top row
+  for var y := 0 to SG.RowCount-1 do begin
+    for var x := 0 to SG.ColCount-1 do begin
+      if SG.Cells[x,y][1] in ['X','?'] then begin
+        Result.Top:= Y;
+        break;
+      end;
+    end; {for x}
+    if Result.Top <> -1 then break;
+  end; {for y}
+  //Find the bottom row
+  for var y := SG.RowCount-1 downto 0 do begin
+    for var x := 0 to SG.ColCount-1 do begin
+      if SG.Cells[x,y][1] in ['X','?'] then begin
+        Result.Bottom:= Y;
+        break;
+      end;
+    end;
+    if Result.Bottom <> -1 then break;
+  end;
+  //Left
+  for var x := 0 to SG.ColCount-1 do begin
+    for var y := 0 to SG.RowCount-1 do begin
+      if SG.Cells[x,y][1] in ['X','?'] then begin
+        Result.Left:= X;
+        break;
+      end;
+    end;
+    if Result.Left <> -1 then break;
+  end;
+  //Right
+  for var x := SG.ColCount-1 downto 0 do begin
+    for var y := 0 to SG.RowCount-1 do begin
+      if SG.Cells[x,y][1] in ['X','?'] then begin
+        Result.Right:= X;
+        break;
+      end;
+    end;
+    if Result.Right <> -1 then break;
+  end;
+end;
 
 procedure TForm2.BtnOld_SolveAndTimeClick(Sender: TObject);
 begin
@@ -4593,24 +4640,25 @@ begin
   // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
-  var MySlices:= TGrid.Create(10,10);
+  var BoundingRect:= FindBoundingBox;
+  var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
-  for var x:= 0 to 9 do begin
-    for var y:= 0 to 9 do begin
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
       //if (x in [0,1,8,9]) or (y in [0,1,8,9]) then begin
-        MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
+        MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
 //      end else begin
 //        //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
 //        MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
 //      end;
       //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
-      StringGrid3.Cells[x+3, y+3]:= '';
+      StringGrid3.Cells[x-1, y-1]:= '';
     end;
   end;
   //Start the timer
   var Timer:= THiResStopWatch.StartNew;
 
-  var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
+  var Status:= MySlices.GridSolveOld(MySlices.BoundingRect);
   //var ValidSolutions: TArray<TGrid>;
   //var ValidCount:= 0;
   //SetLength(ValidSolutions, 100);
@@ -4620,9 +4668,8 @@ begin
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  try
+  if Timer.ElapsedMilliseconds > 0 then begin
     Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  except {do nothing}
   end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
@@ -4636,17 +4683,20 @@ begin
   // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
-  var MySlices:= TDictGrid.Create(10,10);
+  var BoundingRect:= FindBoundingBox;
+  var MySlices:= TDictGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
-  for var x:= 0 to 9 do begin
-    for var y:= 0 to 9 do begin
-      case FutureGridToPastDictSliceSimple(StringGrid1, x+3, y+3, LookupTable) of
-        0: MySlices.Items[x,y]:= TSliceDict.Zero;
-        1: MySlices.Items[x,y]:= TSliceDict.One;
-        -1: MySlices.Items[x,y]:= TSliceDict.Unknown;
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
+      var x1:= x-BoundingRect.Left;
+      var y1:= y-BoundingRect.Top;
+      case FutureGridToPastDictSliceSimple(StringGrid1, x, y, LookupTable) of
+        0: MySlices.Items[x1,y1]:= TSliceDict.Zero;
+        1: MySlices.Items[x1,y1]:= TSliceDict.One;
+        -1: MySlices.Items[x1,y1]:= TSliceDict.Unknown;
       end;
       //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
-      StringGrid3.Cells[x+3, y+3]:= '';
+      //StringGrid3.Cells[x-1, y-1]:= '';
     end;
   end;
   //Start the timer
@@ -4654,7 +4704,7 @@ begin
   //var ValidCount:= 0;
   var Timer:= THiResStopWatch.StartNew;
 
-  var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
+  var Status:= MySlices.GridSolveOld(MySlices.BoundingRect);
   //SetLength(ValidSolutions, 100);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
@@ -4663,9 +4713,8 @@ begin
 
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  try
+  if Timer.ElapsedMilliseconds > 0 then begin
     Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  except {do nothing}
   end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
@@ -4690,29 +4739,29 @@ begin
   // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
-  var MySlices:= TGrid.Create(10,10);
+  var BoundingRect:= FindBoundingBox;
+  var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
-  for var x:= 0 to 9 do begin
-    for var y:= 0 to 9 do begin
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
       //MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
-      MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
+      MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
       //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
       //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
-      StringGrid3.Cells[x+3, y+3]:= '';
+      //StringGrid3.Cells[x+3, y+3]:= '';
     end;
   end;
   //Start the timer
   var Timer:= THiResStopWatch.StartNew;
-  MySlices.FActive.Limit(Rect(0,0,9,9));
-  var Status:= MySlices.GridSolve(Rect(0,0,9,9));
+  MySlices.FActive.Limit(MySlices.BoundingRect);
+  var Status:= MySlices.GridSolve(MySlices.BoundingRect);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolution;
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  try
+  if Timer.ElapsedMilliseconds > 0 then begin
     Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  except {do nothing}
   end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
@@ -4883,7 +4932,7 @@ begin
               end; {for x}
             end; {for y}
             //The grid is set, let's solve it.
-            if Grid.GridSolveOld(Rect(0,0,9,9)).IsInvalid then begin
+            if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then begin
               //We have found a GoE.
               TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
             end else begin
@@ -7350,6 +7399,11 @@ begin
   end; {for i}
 end;
 
+function TGrid.BoundingRect: TRect;
+begin
+  Result:= Rect(0,0,FSizeX-1, FSizeY-1);
+end;
+
 constructor TGrid.Create(SizeX, SizeY: integer);
 begin
   Assert((SizeX * SizeY) >= 1);
@@ -7820,7 +7874,7 @@ begin
     if ((MinSliceIndex) mod FSizeX) < (FSizeX-1) then FActive.Activate(MinSliceIndex+1);
     //solve the grid
     //starting at the pivot (this saves about 10%).
-    var Changes:= Self.GridSolve(Rect(0,0,9,9)); //if we're lucky then there is no solution
+    var Changes:= Self.GridSolve(Self.BoundingRect); //if we're lucky then there is no solution
     if Changes.IsValid then begin
       //There is no quick contradiction, is there perhaps a satisfying assignment here?
       Result:= GetUniqueSolution; //Depth first search for a solution.
@@ -7858,7 +7912,7 @@ begin
     MinSlice.ForceSingleBit(Index); //Is this constellation valid?
     //solve the grid
     //starting at the pivot (this saves about 10%).
-    var Changes:= Self.GridSolveOld(Rect(0,0,9,9), GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+    var Changes:= Self.GridSolveOld(BoundingRect, GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
     if Changes.IsValid then begin
       //There is no quick contradiction, is there perhaps a satisfying assignment here?
       Result:= GetUniqueSolutionOld(ValidSolutions, ValidCount); //Depth first search for a solution.
@@ -7894,7 +7948,7 @@ begin
     MinSlice.ForceSingleBit(Index); //Is this constellation valid?
     //solve the grid
     //starting at the pivot (this saves about 10%).
-    var Changes:= Self.GridSolveOld(Rect(0,0,9,9), GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+    var Changes:= Self.GridSolveOld(Self.BoundingRect, GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
     if Changes.IsValid then begin
       //There is no quick contradiction, is there perhaps a satisfying assignment here?
       Result:= GetUniqueSolutionOld; //Depth first search for a solution.
@@ -8683,6 +8737,11 @@ end;
 
 { TDictGrid }
 
+function TDictGrid.BoundingRect: TRect;
+begin
+  Result:= Rect(0,0,FSizeX-1, FSizeY-1);
+end;
+
 procedure TDictGrid.Clear;
 begin
   for var i:= 0 to FSizeX*FSizeY-1 do begin
@@ -8834,7 +8893,7 @@ begin
     //DebugMinSlice.ForceSingleBit(DebugIndex);
     //solve the grid
     //starting at the pivot (this saves about 10%).
-    var Changes:= Self.GridSolveOld(Rect(0,0,9,9), MinSlice); //if we're lucky then there is no solution
+    var Changes:= Self.GridSolveOld(BoundingRect, MinSlice); //if we're lucky then there is no solution
     if Changes.IsValid then begin
       //There is no quick contradiction, is there perhaps a satisfying assignment here?
       Result:= GetUniqueSolutionOld; //Depth first search for a solution.
