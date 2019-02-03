@@ -4608,17 +4608,19 @@ begin
     end;
   end;
   //Start the timer
-  var Timer:= TStopWatch.StartNew;
+  var Timer:= THiResStopWatch.StartNew;
 
   var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
-  var ValidSolutions: TArray<TGrid>;
-  var ValidCount:= 0;
-  SetLength(ValidSolutions, 100);
+  //var ValidSolutions: TArray<TGrid>;
+  //var ValidCount:= 0;
+  //SetLength(ValidSolutions, 100);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
-  Label1.Caption:= ValidCount.ToString;
+  //Label1.Caption:= ValidCount.ToString;
   Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4645,17 +4647,20 @@ begin
     end;
   end;
   //Start the timer
-  var Timer:= TStopWatch.StartNew;
+  //var ValidSolutions: TArray<TGrid>;
+  //var ValidCount:= 0;
+  var Timer:= THiResStopWatch.StartNew;
 
   var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
-  var ValidSolutions: TArray<TGrid>;
-  var ValidCount:= 0;
-  SetLength(ValidSolutions, 100);
+  //SetLength(ValidSolutions, 100);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
-  Label1.Caption:= ValidCount.ToString;
   Timer.Stop;
+  //Label1.Caption:= ValidCount.ToString;
+
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4691,13 +4696,15 @@ begin
     end;
   end;
   //Start the timer
-  var Timer:= TStopWatch.StartNew;
+  var Timer:= THiResStopWatch.StartNew;
   MySlices.FActive.Limit(Rect(0,0,9,9));
   var Status:= MySlices.GridSolve(Rect(0,0,9,9));
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
   if Status.IsValid then Status:= MySlices.GetUniqueSolution;
   Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
