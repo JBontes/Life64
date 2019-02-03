@@ -114,9 +114,9 @@ object Form2: TForm2
       end
       object Memo1: TMemo
         Left = 6
-        Top = 157
+        Top = 200
         Width = 169
-        Height = 503
+        Height = 460
         Lines.Strings = (
           'Memo1')
         TabOrder = 1
@@ -557,6 +557,15 @@ object Form2: TForm2
         Caption = 'Old_new in lockstep'
         TabOrder = 24
         OnClick = BtnOldNewSolveInLockstepClick
+      end
+      object BtnDictSolveAndTime: TButton
+        Left = 3
+        Top = 157
+        Width = 169
+        Height = 25
+        Caption = 'Dictionary Solve && Time'
+        TabOrder = 25
+        OnClick = BtnDictSolveAndTimeClick
       end
     end
     object TabSheet2: TTabSheet

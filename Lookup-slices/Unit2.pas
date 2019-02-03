@@ -9,7 +9,8 @@ uses
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.Grids, Vcl.ComCtrls,
   JvComponentBase, JvAppStorage, JvAppRegistryStorage, System.Win.TaskbarCore,
   Vcl.Taskbar, System.Actions, Vcl.ActnList, Vcl.PlatformDefaultStyleActnCtrls,
-  Vcl.ActnMan, Universe, OtlCommon, OtlParallel, OtlEventMonitor;
+  Vcl.ActnMan, Universe, OtlCommon, OtlParallel, OtlEventMonitor,
+  System.Generics.Collections, System.Generics.Defaults;
 
 const
   cStanding = true; //deprecated;
@@ -80,6 +81,7 @@ type
     ///  Used to check if we should stop overlapping slices.
     /// </summary>
     class operator Add(a: integer; const b: TSliverChanges): integer; inline;
+    class operator Equal(a,b: TSliverChanges): boolean; inline;
     class operator NotEqual(a,b: TSliverChanges): boolean; inline;
     /// <summary>
     ///  Return a new TSliverChanges containing an Invalid state.
@@ -423,6 +425,20 @@ type
   private
   end;
 
+  TSliceResult = record
+    SW: integer;
+    NE: integer;
+    Changes: TSliverChanges;
+    constructor Create(NE, SW: integer; Change: TSliverChanges);
+  end;
+
+
+  IntPair = TPair<integer, integer>;
+  /// <summary>
+  ///  Look up the confrontation between either two NS slices or two EW slices.
+  /// </summary>
+  TSliceDictionary = TDictionary<IntPair, TSliceResult>;
+
   /// <summary>
   ///  Deprecated, a superslice is the union between to slices, a 4x3 area.
   ///  However, unexpectatly taking the intersection (a 2x3 slice) performs
@@ -762,6 +778,66 @@ type
     function GetEnumerator: TActiveSlice.TActiveEnumerator;
   end;
 
+  TSliceDict = class;
+
+  TSliceDictionaryComparer = class(TSingletonImplementation, IEqualityComparer<IntPair>)
+    function Equals(const Left, Right: IntPair): Boolean; reintroduce;
+    function GetHashCode(const Value: IntPair): Integer; reintroduce;
+  end;
+
+
+  TNoDupsDictComparer = class(TSingletonImplementation, IEqualityComparer<integer>)
+  private
+    FParent: TSliceDict;
+  public
+    constructor Create(Parent: TSliceDict);
+    function Equals(const Left, Right: integer): Boolean; reintroduce;
+    function GetHashCode(const Value: integer): Integer; reintroduce;
+  end;
+
+  TEmpty = record
+  end;
+
+  TSliceDict = class
+  private
+    const LineSize = 1024*1024;
+  private
+    const Zero = 512;
+    const One = Zero+1;
+    const Unknown = Zero+2;
+    const Invalid = Zero+3;
+  private
+    NSDictionary: TSliceDictionary;
+    EWDictionary: TSliceDictionary;
+    FSliceDictionaryComparer: TSliceDictionaryComparer;
+    FNoDupsComparer: TNoDupsDictComparer;
+    SliceDB: TArray<TArray<TSlice>>;  //2D array, every element is 1024*1024 slices.
+    NoDupsDict: TDictionary<integer, integer>; //Make sure we don't insert duplicate slices in the SliceDB
+    //Store the Slices in a 2D array so that upon expansion we don't have to move data.
+    FIndex: integer;
+  public
+    /// <summary>
+    ///  Add the unity slices 1..512 and the yes/no slices.
+    /// </summary>
+    constructor Create;
+    /// <summary>
+    ///  Check to see if N+S is in the dict, if not, look it up and add it to
+    ///  the dictionary.
+    ///  Return the new North and South Indexes and report back on the changes.
+    /// </summary>
+    procedure NS(var North, South: integer; out Changes: TSliverChanges);
+    /// <summary>
+    ///  Check to see if E+W is in the dict, if not, look it up and add it to
+    ///  the dictionary.
+    ///  Return the new East and West Indexes and report back on the changes.
+    /// </summary>
+    procedure EW(var East, West: integer; out Changes: TSliverChanges);
+  private
+    function GetItem(index: integer): PSlice;
+    function InsertSlice(const Slice: TSlice): integer;
+    property Item[index: integer]: PSlice read GetItem; default;
+  end;
+
 
   /// <summary>
   ///  A grid is a grid of slices.
@@ -831,15 +907,33 @@ type
     ///  Returns Invalid if the pattern is UNSAT, Valid if it is.
     /// </summary>
     function GetUniqueSolution: TSliverChanges;
-    function GetUniqueSolutionOld(var ValidSolutions: TArray<TGrid>; var ValidCount: integer): TSliverChanges;
+    function GetUniqueSolutionOld: TSliverChanges; overload;
+    function GetUniqueSolutionOld(var ValidSolutions: TArray<TGrid>; var ValidCount: integer): TSliverChanges; overload;
     /// <summary>
     ///  Find the slice with the lowest population count >= 2,
     ///  That does not equal MinSlice.
     ///  Pass nil in MinSlice if any slice will do.
     /// </summary>
     procedure GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
+    /// <summary>
+    ///  Convert a unique grid (a grid where every slice only has a single allowed constellation)
+    ///  To a bitmap that can be processed.
+    ///  the output is an 2D array of TUnit, based on the size of the grid with 1 pixel around the
+    ///  border.
+    /// </summary>
+    procedure GridToBitmap(out Bitmap: array of TUnit);
     function GetSliceIndex(Slice: PSlice): integer;
     procedure DisplayUniqueSolution(const SG: TStringGrid);
+    /// <summary>
+    ///  Return the count of bitmaps needed to convert a Grid into a bitmap
+    /// </summary>
+    function BitmapsNeeded: integer;
+    /// <summary>
+    ///  Transform a unique grid (a grid with only one allowed state for every slice in it)
+    ///  to a past Grid. If AllowGrowth is true then the result grid will be larger than the
+    ///  original grid.
+    /// </summary>
+    function GetPastGrid(AllowGrowth: boolean): TGrid;
   public type
     /// <summary>
     ///  After the basic overlapping of gridwalker has run out of steam
@@ -981,6 +1075,38 @@ type
     property Item[const Coordinate: TPoint]: TSlice read GetSlice write SetSlice; default;
     property Item[x,y: integer]: TSlice read GetSlice write SetSlice; default;
     property Item[i: integer]: TSlice read GetSlice write SetSlice; default;
+  end;
+
+    TDictGrid = record
+  private
+    FSizeX, FSizeY: integer;
+    FData: TArray<integer>;   //Every slice in the structure is represented by an index
+    FDict: TSliceDict;
+    FIsValid: boolean;
+    //FDebugGrid: TGrid;
+    function GetSlices(index: integer): PSlice; inline;
+    function GridSolveOld(const Bounds: TRect; IndexStart: integer = -1): TSliverChanges;
+    procedure SetItems(x, y: integer; const Value: integer);
+    function GetSlicesXY(x, y: integer): PSlice; inline;
+  public
+    /// <summary>
+    ///  initialize a new Grid with dimensions x and y.
+    ///  All the slices will be fully unknown initially
+    /// </summary>
+    constructor Create(SizeX, SizeY: integer); overload;
+    constructor Create(const Template: TDictGrid); overload;
+    procedure Overwrite(var GridToBeOverwritten: TDictGrid);
+    procedure Clear;
+    function Clone: TDictGrid;
+    function SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function SliverSolveReverseOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function GetUniqueSolutionOld: TSliverChanges;
+    function GetMinSlice(out MinCount: integer): integer;
+    property Slices[index: integer]: PSlice read GetSlices;
+    property SlicesXY[x,y: integer]: PSlice read GetSlicesXY;
+    property Items[x,y: integer]: integer write SetItems; default; //write-only property
+    property SizeX: integer read FSizeX;
+    property SizeY: integer read FSizeY;
   end;
 
   /// <summary>
@@ -1125,6 +1251,7 @@ type
     BtnReverseLookup: TButton;
     Btn5x5To3x3_Lookup: TButton;
     BtnOldNewSolveInLockstep: TButton;
+    BtnDictSolveAndTime: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1178,6 +1305,7 @@ type
     procedure BtnReverseLookupClick(Sender: TObject);
     procedure Btn5x5To3x3_LookupClick(Sender: TObject);
     procedure BtnOldNewSolveInLockstepClick(Sender: TObject);
+    procedure BtnDictSolveAndTimeClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -1261,6 +1389,9 @@ uses{$IFDEF GpProfile U} GpProf, {$ENDIF GpProfile U}
 {$R *.dfm}
 {$POINTERMATH on}
 
+var
+  GlobalDict: TSliceDict;
+
 { TODO -oOwner -cGeneral : Fix me }
 const
   OffMask: array [0 .. 8] of TSlice = ((Data8: ($5555555555555555, $5555555555555555, $5555555555555555,
@@ -1281,6 +1412,9 @@ const
     $FFFFFFFFFFFFFFFF, $0000000000000000, $0000000000000000)),
     (Data8: ($FFFFFFFFFFFFFFFF, $FFFFFFFFFFFFFFFF, $FFFFFFFFFFFFFFFF, $FFFFFFFFFFFFFFFF, $0000000000000000,
     $0000000000000000, $0000000000000000, $0000000000000000)));
+
+  OffSlice: TSlice = (Data8:($E881E9978117977F, $FEE8FEE9E881E997, $FEE8FEE9E881E997, $FFFEFFFEFEE8FEE9,
+                             $FEE8FEE9E881E997, $FFFEFFFEFEE8FEE9, $FFFEFFFEFEE8FEE9, $FFFFFFFFFFFEFFFE));
 
 
 const
@@ -1311,6 +1445,211 @@ type
   end;
 
   TRotation = (rNone, rCounter, rClock, r180);
+
+{$WARNINGS OFF}
+// Meiyan means Beauty, Charming Eyes or most precisely: SOULFUL EYES.
+function PascalFNV1A_Hash_Meiyan(const HashData; Len: integer; Seed: integer = 0): integer;
+const
+  //prime = 709607;
+  prime = 16777619;
+  offset_basis = 2166136261;
+  n = $E6546B64;
+var
+  Hash32: integer;
+  p: PInteger;
+  Tail: integer;
+  Temp: integer;
+begin
+  p:= @HashData;
+  Hash32:= Seed + offset_basis;
+  Tail:= Hash32;
+  while Len >= 2 * SizeOf(cardinal) do begin
+    Hash32:= (Hash32 xor (((p[0] shl 5) or (p[0] shr (32 - 5))) xor p[1]));
+    Tail:= Tail xor Hash32;
+    Hash32:= Hash32 * prime;
+    Inc(p, 2);
+    dec(Len, SizeOf(integer)* 2)
+  end;
+  if (Len and SizeOf(integer)) <> 0 then begin
+    Temp:= p^;
+    Tail:= Tail xor p^;
+    Hash32:= (Hash32 xor (temp and $FFFF)) * prime;
+    Tail:= Tail xor Hash32;
+    Hash32:= (Hash32 xor (temp shr 16)) * prime;
+    Inc(p);
+  end;
+  if (Len and SizeOf(word)) <> 0 then begin
+    Temp:= PWord(p)^;
+    Tail:= Tail xor Temp;
+    Hash32:= (Hash32 xor Temp) * prime;
+    Inc(PWord(p));
+  end;
+  if (Len and 1) <> 0 then begin
+    Temp:= PByte(p)^;
+    Tail:= Tail xor Temp;
+    Hash32:= (Hash32 xor Temp) * prime;
+  end;
+  //Extra shuffle
+  Tail:= (Tail * 17) + n;
+  //Hash32:= Hash32 + Tail;
+  Result:= (Hash32 + Tail) xor (Hash32 shr 16);
+end;
+{$POINTERMATH off}
+
+function FNV1A_Hash_Meiyan(const HashData; Len: integer; Seed: integer = 0): integer;
+const
+  //prime = 709607;
+  prime = 16777619;
+  n = $E6546B64;
+  offset_basis = 2166136261;
+  {$REGION 'assembly'}
+  {$IFDEF CPUX86}
+  asm
+    // EAX = STR
+    // EDX = len
+    // ECX = seed
+    push  EBX
+    push  ESI
+    push  EDI
+    add   ECX, offset_basis
+    add   EAX,EDX
+    lea   ESI,[EDX-8]
+    neg   ESI
+    jg @remaining
+  @Loop8:
+    mov   EBX,[EAX+ESI-8]
+    rol   EBX,5
+
+    xor   EBX,[EAX+ESI-8+4]
+    xor   ECX,EBX
+    mov   EDI,ECX
+    imul  ECX,ECX,prime
+    add   ESI,$08
+    jle @loop8
+  @remaining:
+    lea   ESI,[ESI+EAX-8]
+    test  DL,$4
+    jz @wordsize
+
+    mov   EBX,[ESI]
+    mov   EDI,EBX
+    mov   EAX,EBX
+    and   EBX,$ffff
+    xor   ECX,EBX
+    imul  ECX,ECX,prime
+
+    shr   EAX,16
+    xor   ECX,EAX
+    imul  ECX,ECX,prime
+
+    add   ESI,$04
+  @wordsize:
+    test  DL,2
+    jz @bytESIze
+
+    movzx EBX, word ptr [ESI]
+    mov   EDI,EBX
+    xor   ECX,EBX
+    imul  ECX,ECX,prime
+
+    add   ESI,$02
+  @bytesize:
+    test  DL,1
+    jz @wrapup
+
+    movzx EBX, byte ptr [ESI]
+    mov   EDI,EBX
+    xor   ECX,EBX
+    imul  ECX,ECX,prime
+@wrapup:
+//  @wrapup:
+//    //Reduce collisions for short keys.
+//    //The extra instructions are hidden in the latency of imul
+    lea   EAX,[EDI*8]
+    lea   EBX,[EAX*2+EDI+n]
+    lea   EAX,[EBX+ECX]
+    shr   ECX,16
+    xor   EAX,ECX
+    pop   EDI
+    pop   ESI
+    pop   EBX
+end;
+{$ENDIF}
+{$IFDEF CPUX64}
+asm
+.NOFRAME
+    // ECX = STR
+    // EDX = len
+    // R8 = seed
+    add   RCX,RDX
+    add   R8d,offset_basis
+    lea   R11,[RDX-8]
+    neg   R11
+    mov   R10d,R8d
+    jg @remaining
+@Loop8:
+    //Hash32:= (Hash32 xor (p[0] rol 5) xor p[1])) * prime;
+    //Inc(p, 2);
+    //dec(Len, SizeOf(integer)* 2)
+    mov   RAX,[RCX+R11-8]
+    mov   R9,RAX
+    rol   R9d,5
+    shr   RAX,32
+    xor   EAX,R9d
+    xor   R8d,EAX
+    //Tail:= Tail xor Hash32
+    xor   R10d,R8d
+    imul  R8d,R8d,prime
+    add   R11,$08
+    jle @loop8
+@remaining:
+    //xor   R10,R10
+    lea   R11,[R11+RCX-8]
+    test  DL,$4
+    jz @wordsize
+//    Tail:= p^;
+    mov   EAX,[R11]
+//    Hash32:= (Hash32 xor (Tail and $FFFF)) * prime;
+    xor   R10d, EAX
+    mov   R9d,EAX
+    and   R9d,$ffff
+    xor   R8d,R9d
+    imul  R8d,R8d,prime
+//    Hash32:= (Hash32 xor (Tail shr 16)) * prime;
+    //mov   R10d,EAX
+    xor   R10d,R8d
+    shr   EAX,16
+    xor   R8d,EAX
+    imul  R8d,R8d,prime
+//    Inc(PWord(p));
+    add   R11,$04
+@wordsize:
+    test  DL,2
+    jz @bytesize
+
+    movzx R9d, word ptr [R11]
+    xor   R8d,R9d
+    xor   R10d,R9d
+    imul  R8d,R8d,prime
+
+    add   R11,$02
+@bytesize:
+    test DL,1
+    jz @wrapup
+
+    movzx R9d, byte ptr [R11]
+    xor   R8d,R9d
+    xor   R10d,R9d
+    imul  R8d,R8d,prime
+@wrapup:
+    lea   EAX,[R10d*8]
+    lea   ECX,[EAX*2+R10d+n]
+    lea   EAX,[ECX+R8d]
+    shr   R8d,16
+    xor   EAX,R8d
+end;
+{$ENDIF}
+{$ENDREGION}
 
 procedure Move(const source; var Dest; Size: NativeInt);
 //RCX = @source
@@ -1807,10 +2146,17 @@ begin
   else Result:= ZeroSlice;
 end;
 
+function FutureGridToPastDictSliceSimple(const SG: TStringGrid; col, row: integer; const LookupTable: TLookupTable): integer;
+begin
+  if (SG.Cells[col + 2, row + 2] = 'X') then Result:= 1
+  else if (SG.Cells[col + 2, row + 2] = '?') then Result:= -1
+  else Result:= 0;
+end;
+
 /// <summary>
 ///   Display the constellation-counts of a slice on-screen.
 /// </summary>
-procedure DisplaySlices(SG, SGDiff: TStringGrid; Slices: TGrid; ForceRefresh: boolean = false);
+procedure DisplaySlices(SG, SGDiff: TStringGrid; Slices: TGrid; ForceRefresh: boolean = false); overload;
 var
   x, y: integer;
   Slice: TSlice;
@@ -1832,6 +2178,60 @@ begin
     for y:= StartY to StartY+Slices.SizeY-1 do begin
       Known:= Form2.StringGrid1.Cells[x+2,y+2] <> '?';
       Slice:= Slices[x-StartX, y-StartY];
+      if (SG.Cells[x, y] <> '') then Old:= SG.Cells[x, y].ToInteger
+      else begin
+        case Form2.GetPixelChar(x + 2, y + 2, Form2.StringGrid1) of
+          'X': Old:= 140;
+          '?': Old:= 512;
+        else Old:= 140;
+        end;
+      end;
+      Population:= Slice.PopCount;
+      SG.Cells[x, y]:= Population.ToString;
+      if (Known) and not(TooManyStates) then begin
+        TotalStates:= TotalStates * Population;
+        Frexp(TotalStates, Dummy, Exponent);
+        TooManyStates:= (Exponent > 100);
+      end;
+      SGDiff.Cells[x, y]:= (Old - Slice.PopCount).ToString;
+    end; { for y }
+  end; { for x }
+  if (ForceRefresh) then begin
+    SG.Refresh;
+    SGDiff.Refresh;
+  end;
+  if (TotalStates > 1000000000) then Solutions:= Format('%2.6e',[TotalStates])
+  else Solutions:= Format('%.0n',[TotalStates]);
+  Solutions:= ReplaceStr(Solutions,'E+00','E+');
+  Solutions:= ReplaceStr(Solutions,'E+0','E+');
+  Solutions:= ReplaceStr(Solutions,'E+','e+');
+  Form2.LabelSolutions.Caption:= 'Solutions: '+Solutions;
+end;
+
+/// <summary>
+///   Display the constellation-counts of a slice on-screen.
+/// </summary>
+procedure DisplaySlices(SG, SGDiff: TStringGrid; Slices: TDictGrid; ForceRefresh: boolean = false); overload;
+var
+  x, y: integer;
+  Old: integer;
+  Known: boolean;
+  TotalStates: double;
+  Population: integer;
+  Solutions: string;
+  TooManyStates: boolean;
+  Dummy: double;
+  Exponent: integer;
+begin
+  var StartX:= (16-Slices.SizeX) div 2;
+  var StartY:= (16-Slices.SizeY) div 2;
+
+  TooManyStates:= false;
+  TotalStates:= 1;
+  for x:= StartX to StartX+Slices.SizeX-1 do begin
+    for y:= StartY to StartY+Slices.SizeY-1 do begin
+      Known:= Form2.StringGrid1.Cells[x+2,y+2] <> '?';
+      var Slice:= Slices.SlicesXY[x-StartX, y-StartY];
       if (SG.Cells[x, y] <> '') then Old:= SG.Cells[x, y].ToInteger
       else begin
         case Form2.GetPixelChar(x + 2, y + 2, Form2.StringGrid1) of
@@ -2154,7 +2554,7 @@ var
 
   function DoEW: TSliverChanges;
   begin
-    if x < (MinMax.Right) then begin
+    if (x < MinMax.Right) then begin
       var IndexEast:= IndexCenter+1;
       //If there is a problem the sliver will be invalid.
       Sliver:= TSliver.EW(Self[IndexEast], Self[IndexCenter], Result);
@@ -2165,7 +2565,7 @@ var
 
   function DoNS: TSliverChanges;
   begin
-    if y < (MinMax.Bottom) then begin
+    if (y < MinMax.Bottom) then begin
       var IndexSouth:= IndexCenter + FSizeX;
       Sliver:= TSliver.NS(Self[IndexCenter], Self[IndexSouth], Result);
       if Result.SouthChanged then Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
@@ -4197,9 +4597,12 @@ begin
   // Get the slice data from the grid, by looking it up in the lookup table
   for var x:= 0 to 9 do begin
     for var y:= 0 to 9 do begin
-      //MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
-      MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
-      //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
+      //if (x in [0,1,8,9]) or (y in [0,1,8,9]) then begin
+        MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
+//      end else begin
+//        //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
+//        MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
+//      end;
       //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
       StringGrid3.Cells[x+3, y+3]:= '';
     end;
@@ -4212,13 +4615,51 @@ begin
   var ValidCount:= 0;
   SetLength(ValidSolutions, 100);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
-  if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld(ValidSolutions, ValidCount);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
   Label1.Caption:= ValidCount.ToString;
   Timer.Stop;
   Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
+
+procedure TForm2.BtnDictSolveAndTimeClick(Sender: TObject);
+begin
+  // Read the lookup table
+  // if not FileOpenDialog1.Execute then Exit;
+  // FS:= TFileStream.Create(FileOpenDialog1.FileName, fmOpenRead);
+  // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
+  // FS.Read64(TBytes(LookupTable), 0, FS.Size);
+  // FS.Free;
+  var MySlices:= TDictGrid.Create(10,10);
+  // Get the slice data from the grid, by looking it up in the lookup table
+  for var x:= 0 to 9 do begin
+    for var y:= 0 to 9 do begin
+      case FutureGridToPastDictSliceSimple(StringGrid1, x+3, y+3, LookupTable) of
+        0: MySlices.Items[x,y]:= TSliceDict.Zero;
+        1: MySlices.Items[x,y]:= TSliceDict.One;
+        -1: MySlices.Items[x,y]:= TSliceDict.Unknown;
+      end;
+      //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+      StringGrid3.Cells[x+3, y+3]:= '';
+    end;
+  end;
+  //Start the timer
+  var Timer:= TStopWatch.StartNew;
+
+  var Status:= MySlices.GridSolveOld(Rect(0,0,9,9));
+  var ValidSolutions: TArray<TGrid>;
+  var ValidCount:= 0;
+  SetLength(ValidSolutions, 100);
+  //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
+  Label1.Caption:= ValidCount.ToString;
+  Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
+  else Memo1.Lines.Add('SAT - Pattern has a solution');
+end;
+
 
 // orig    counter   clock    diagonal other diag
 // 012     258       630      036      852
@@ -4243,9 +4684,9 @@ begin
   for var x:= 0 to 9 do begin
     for var y:= 0 to 9 do begin
       //MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
-      //MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
-      MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
-      DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+      MySlices[x, y]:= FutureGridToPastSliceSimple(StringGrid1, x+3, y+3, LookupTable);
+      //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
+      //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
       StringGrid3.Cells[x+3, y+3]:= '';
     end;
   end;
@@ -4320,8 +4761,61 @@ begin
   MemoGoE_solution.Lines.SaveToFile('GoE_solutions.txt');
 end;
 
+function Flip45(input: integer): integer;
+begin
+  Result:= ((input and (1 shl 24)) shr (24-0)) xor  //24-> 0
+           ((input and (1 shl 19)) shr (19-1)) xor  //19-> 1
+           ((input and (1 shl 14)) shr (14-2)) xor  //14-> 2
+           ((input and (1 shl 9))  shr (9-3)) xor   //9 -> 3
+           ((input and (1 shl 4))  shr (4-4)) xor   //4 -> 4
+
+           ((input and (1 shl 23)) shr (23-5)) xor
+           ((input and (1 shl 18)) shr (18-6)) xor
+           ((input and (1 shl 13)) shr (13-7)) xor
+           ((input and (1 shl 8))  shr (8-8)) xor
+           ((input and (1 shl 3))  shl (9-3)) xor
+
+           ((input and (1 shl 22)) shr (22-10)) xor
+           ((input and (1 shl 17)) shr (17-11)) xor
+           ((input and (1 shl 12)) shr (12-12)) xor
+           ((input and (1 shl 7))  shl (13-7)) xor
+           ((input and (1 shl 2))  shl (14-2)) xor
+
+           ((input and (1 shl 21)) shr (21-15)) xor
+           ((input and (1 shl 16)) shr (16-16)) xor
+           ((input and (1 shl 11)) shl (17-11)) xor
+           ((input and (1 shl 6))  shl (18-6)) xor
+           ((input and (1 shl 1))  shl (19-1)) xor
+
+           ((input and (1 shl 20)) shr (20-20)) xor
+           ((input and (1 shl 15)) shl (21-15)) xor
+           ((input and (1 shl 10)) shl (22-10)) xor
+           ((input and (1 shl 5))  shl (23-5)) xor
+           ((input and (1 shl 0))  shl (24-0));
+end;
+
+function Flip45Part(input: integer): integer;
+begin
+  Result:= ((input and (1 shl 3))  shl (9-3)) xor
+
+           ((input and (1 shl 7))  shl (13-7)) xor
+           ((input and (1 shl 2))  shl (14-2)) xor
+
+           ((input and (1 shl 11)) shl (17-11)) xor
+           ((input and (1 shl 6))  shl (18-6)) xor
+           ((input and (1 shl 1))  shl (19-1)) xor
+
+           ((input and (1 shl 15)) shl (21-15)) xor
+           ((input and (1 shl 10)) shl (22-10)) xor
+           ((input and (1 shl 5))  shl (23-5)) xor
+           ((input and (1 shl 0))  shl (24-0));
+  Result:= (input and $119DFF) xor Result;
+end;
+
 procedure TForm2.BtnSearchGoEClick(Sender: TObject);
 begin
+  Assert(Flip45($1FFFFFF) = $1FFFFFF);
+  Assert(Flip45Part($119DFF) = $1FFFFFF);
   EnableAllCPUCores;
   BtnSearchGoE.Enabled:= false;
 
@@ -4358,9 +4852,10 @@ begin
           for var NE:= 0 to 100 do begin
 
             var iNW:= CountsIndex[NW];
-            var iSE:= CountsIndex[SE];
-            var iSW:= CountsIndex[SW];
-            var iNE:= CountsIndex[NE];
+            var iSE:= Flip45(iNW);
+            var iSW:= Flip45Part(CountsIndex[SW]);
+            var iNE:= Flip45Part(CountsIndex[NE]);
+
             //Now get the pixels from the i's
             for var y:= 0 to 4 do begin
               for var x:= 4 downto 0 do begin
@@ -4377,7 +4872,7 @@ begin
               TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
             end else begin
               //Not yet, keep looking
-              if Grid.GetUniqueSolution.IsInvalid then begin
+              if Grid.GetUniqueSolutionOld.IsInvalid then begin
                 //We have found a GoE
                 TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
               end;
@@ -4496,6 +4991,7 @@ begin
       AppRegistry.WriteString(cMainIndex, Filename);
     end;
     LookupTable.LoadMainIndex(Filename);
+    GlobalDict:= TSliceDict.Create;
 
     Filename:= AppRegistry.ReadString(cMainSliceData);
     if (Filename = '') then begin
@@ -6017,7 +6513,7 @@ begin
   end;
   // Now add pixel 5
   // Double every uint32
-  // Expanding 32 bytes (=4 int32) into 64 bytes
+  // Expanding 16 bytes (=4 int32) into 32 bytes
   for i:= 0 to 3 do begin
     Temp2.Data4[i * 2]:= Temp1.Data4[i];
     Temp2.Data4[i * 2 + 1]:= Temp1.Data4[i];
@@ -6173,7 +6669,7 @@ begin
     Temp2.bytes[i * 2]:= Temp1.bytes[i];
     Temp2.bytes[i * 2 + 1]:= Temp1.bytes[i];
   end;
-  // Finally add pixel 6, his doubles every int64.
+  // Finally add pixel 6, this doubles every int64.
   // Expanding the slice from 32 (= 4 int64) into 64 bytes (=8int64)
   for i:= 0 to 3 do begin
     Result.Data8[i * 2]:= Temp2.Data8[i];
@@ -6593,6 +7089,11 @@ begin
   Result:= (scSWChanged in Self.Data);
 end;
 
+class operator TSliverChanges.Equal(a, b: TSliverChanges): boolean;
+begin
+  Result:= (a.Raw = b.Raw);
+end;
+
 class operator TSliverChanges.NotEqual(a, b: TSliverChanges): boolean;
 begin
   Result:= (a.Raw <> b.Raw);
@@ -6937,8 +7438,6 @@ begin
   Result:= not(FIsValid);
 end;
 
-
-
 function TGrid.Join(const Grids: TArray<TGrid>): TGrid;
 var
   i: integer;
@@ -6980,7 +7479,6 @@ function TGrid.GridSolve: TSliverChanges;
 begin
   Result:= GridSolve(Rect(0,0,FSizeX-1, FSizeY-1));
 end;
-
 
 function TGrid.GridSolve(const Bounds: TRect): TSliverChanges;
 label
@@ -7133,6 +7631,74 @@ Done:
   Self.FIsValid:= Result.IsValid;
 end;
 
+function TGrid.BitmapsNeeded: integer;
+begin
+  var xB:= ((FSizeX+2) div 16) + integer(((FSizeX+2) mod 16) > 0);
+  var yB:= ((FSizeY+2) div 8)  + integer(((FSizeY+2) mod 8) > 0);
+  Result:= xB * yB;
+end;
+
+procedure TGrid.GridToBitmap(out Bitmap: array of TUnit);
+var
+  x,y: integer;
+begin
+  Assert(Length(Bitmap) = BitmapsNeeded);
+  var xB:= ((FSizeX+2) div 16) + integer(((FSizeX+2) mod 16) > 0);
+  var MaxY:= ((FSizeY) div 3);
+  var MaxX:= ((FSizeX) div 3);
+  for var y2:= 0 to MaxY do begin  //not MaxY-1, because we have to process the border as well
+    if y2 = MaxY then y:= FSizeY-2 else y:= y2*3;
+    for var x2:= 0 to MaxX do begin //not MaxX-1
+      if x2 = MaxX then x:= FSizeX-2 else x:= x2*3;
+      var Index:= Self[x,y].NextSetBit(-1);
+      for var y1:= 0 to 2 do begin
+        for var x1:= 0 to 2 do begin
+          var x3:= (x+x1);
+          var y3:= (y+y1);
+          if Odd(Index) then Bitmap[(x3 div 16) + ((y3 div 8)*xB)].SetPixel(x3 mod 16,y3 mod 8);
+        end; {for x1}
+      end; {for y1}
+    end; {for x2}
+  end; {for y2}
+end;
+
+function TGrid.GetPastGrid(AllowGrowth: boolean): TGrid;
+var
+  Slice: array[boolean] of TSlice;
+begin
+  Assert(Integer(AllowGrowth) in [0,1]);
+  Result:= TGrid.Create(FSizeX + Integer(AllowGrowth) *2, FSizeY+Integer(AllowGrowth)*2);
+  Slice[false]:= Form2.LookupTable[0,oCenter];
+  Slice[true]:= not(Slice[false]);
+  //if we AllowGrowth then start at 1,1 else start at 0,0
+  var StartX:= Integer(AllowGrowth);
+  var StartY:= StartX;
+  for var y:= 0 to FSizeX-1 do begin
+    for var x:= 0 to FSizeX-1 do begin
+      var Index:= Self[x,y].NextSetBit(-1);
+      Result[x+StartX, y+StartY]:= Slice[(Index and (1 shl 4)) <> 0];
+      if AllowGrowth then begin
+        if y = 0 then begin //process the top row and top two corners
+          if x = 0 then Result[0,0]:= Slice[(Index and (1 shl 2)) <> 0];
+          if x = (FSizeX-1) then Result[FSizeX+1,0]:= Slice[(Index and (1 shl 0)) <> 0];
+          Result[x+1,0]:= Slice[(Index and (1 shl 1)) <> 0];
+        end;
+        if y=(FSizeY-1) then begin //process the bottom row and bottom two corners
+          if x = 0 then Result[0,FSizeY+1]:= Slice[(Index and (1 shl 8)) <> 0];
+          if x = (FSizeX-1) then Result[FSizeX+1,FSizeY+1]:= Slice[(Index and (1 shl 6)) <> 0];
+          Result[x+StartX,FSizeY+1]:= Slice[(Index and (1 shl 7)) <> 0];
+        end;
+      end; {if AllowGrowth}
+    end; {for x}
+    if AllowGrowth then begin
+      var Index:= Self[0,y].NextSetBit(-1);
+      Result[0, y+1]:= Slice[(Index and (1 shl 5)) <> 0];
+      Index:= Self[FSizeX-1,y].NextSetBit(-1);
+      Result[FSizeX+1, y+1]:= Slice[(Index and (1 shl 3)) <> 0];
+    end; {if AllowGrowth}
+  end; {for y}
+end;
+
 procedure TGrid.GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
 begin
   MinCount:= 513;
@@ -7252,8 +7818,6 @@ begin
   Result:= TSliverChanges.Invalid;
 end;
 
-
-
 function TGrid.GetUniqueSolutionOld(var ValidSolutions: TArray<TGrid>; var ValidCount: integer): TSliverChanges;
 const
   HasUniqueSolution = 513;
@@ -7293,6 +7857,40 @@ begin
   else Result:= TSliverChanges.Changed;
 end;
 
+function TGrid.GetUniqueSolutionOld: TSliverChanges;
+const
+  HasUniqueSolution = 513;
+var
+  MinCount: integer;
+  MinSlice: PSlice;
+begin
+  GetMinSlice(MinSlice, MinCount);
+  //If we cannot find a count other than 1, then we have reached a unique solution.
+  if (MinCount = HasUniqueSolution) then begin
+    Exit(TSliverChanges.Changed);
+  end;
+  //FActive.Activate(GetSliceIndex(MinSlice));
+  //Explore each of the alternatives recursively
+  var Clone:= Self.Clone;
+  var Index:= -1;
+  for var i:= 0 to MinCount -1 do begin
+    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
+    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+    //solve the grid
+    //starting at the pivot (this saves about 10%).
+    var Changes:= Self.GridSolveOld(Rect(0,0,9,9), GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+    if Changes.IsValid then begin
+      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+      Result:= GetUniqueSolutionOld; //Depth first search for a solution.
+      if Result.IsValid then Exit;   //Early out when we have a unique solution
+    end;
+    //No single solution? then reset the grid and try the next constellation
+    if (i < (MinCount-1)) then Clone.Overwrite(Self)
+  end; {for i}
+    //We have now reduced our grid to only those states that are valid upon first inspection.
+    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+  Result:= TSliverChanges.Invalid
+end;
 
 
 function TGrid.SpeculativeExploration(Strategy: TExplorationStrategy; const SamplePoint: TPoint): TSliverChanges;
@@ -7421,7 +8019,6 @@ end;
 
 { TPointHelper }
 
-
 function TPointHelper.Index(XSize: integer): integer;
 begin
   Result:= (y * XSize) + x;
@@ -7446,7 +8043,6 @@ function TPointHelper.South(XSize: integer): integer;
 begin
   Result:= ((y+1) * XSize) + x;
 end;
-
 
 { TGrid.TGridEnumerator }
 
@@ -7810,8 +8406,6 @@ begin
   Result:= TActiveSlice.TActiveEnumerator.Create(@Self, true, FSizeX);
 end;
 
-
-
 function TActiveSlice.NextSetBit(previous: integer): integer;
 asm
   // RCX: self
@@ -7963,4 +8557,398 @@ begin
   FActiveSlice:= Parent;
 end;
 
+{ TSliceDict }
+
+constructor TSliceDict.Create;
+begin
+  inherited Create;
+  FSliceDictionaryComparer:= TSliceDictionaryComparer.Create;
+  Self.NSDictionary:= TSliceDictionary.Create(FSliceDictionaryComparer);
+  Self.EWDictionary:= TSliceDictionary.Create(FSliceDictionaryComparer);
+  FNoDupsComparer:= TNoDupsDictComparer.Create(Self);
+  Self.NoDupsDict:= TDictionary<integer, integer>.Create(FNoDupsComparer);
+  SetLength(SliceDB, 1024); //Reserve 1024* 1 million entries. (64 GB) max.
+  SetLength(SliceDB[0], LineSize); //Allocate the first line.
+  for var i := 0 to 511 do begin
+    var Slice:= TSlice.FullyEmpty;
+    Slice.ForceSingleBit(i);
+    InsertSlice(Slice);
+  end;
+  InsertSlice(OffSlice); //Off slice
+  InsertSlice(not(SliceDB[0][512])); //On Slice;
+  InsertSlice(TSlice.FullyUnknown);
+  InsertSlice(TSlice.FullyEmpty);
+  Assert(FIndex = (Invalid+1));
+end;
+
+procedure TSliceDict.EW(var East, West: integer; out Changes: TSliverChanges);
+begin
+  var EW:= TPair<integer, integer>.Create(East,West);
+  var Result: TSliceResult;
+  if EWDictionary.TryGetValue(EW, Result) then begin
+    Changes:= Result.Changes;
+    East:= Result.NE;
+    West:= Result.SW;
+  end else begin
+    var E:= Item[East];
+    var W:= Item[West];
+    var Sliver:= TSliver.EW(E^,W^, Changes);
+    if Changes.EastChanged then begin
+      var E2:= E^ and Sliver.East;
+      East:= InsertSlice(E2);
+    end;
+    if Changes.WestChanged then begin
+      var W2:= W^ and Sliver.West;
+      West:= InsertSlice(W2);
+    end;
+    EWDictionary.Add(EW, TSliceResult.Create(East, West, Changes));
+  end;
+end;
+
+procedure TSliceDict.NS(var North, South: integer; out Changes: TSliverChanges);
+begin
+  var NS:= TPair<integer, integer>.Create(North, South);
+  var Result: TSliceResult;
+  if NSDictionary.TryGetValue(NS, Result) then begin
+    Changes:= Result.Changes;
+    North:= Result.NE;
+    South:= Result.SW;
+  end else begin
+    var N:= Item[North];
+    var S:= Item[South];
+    var Sliver:= TSliver.NS(N^,S^, Changes);
+    if Changes.NorthChanged then begin
+      var N2:= N^ and Sliver.North;
+      North:= InsertSlice(N2);
+    end;
+    if Changes.SouthChanged then begin
+      var S2:= S^ and Sliver.South;
+      South:= InsertSlice(S2);
+    end;
+    NSDictionary.Add(NS, TSliceResult.Create(North, South, Changes));
+  end;
+end;
+
+function TSliceDict.GetItem(index: integer): PSlice;
+begin
+  var Y:= Index mod LineSize;
+  var X:= Index div LineSize;
+  Result:= @SliceDB[x][y];
+end;
+
+function TSliceDict.InsertSlice(const Slice: TSlice): integer;
+begin
+  var Y:= FIndex mod LineSize;
+  var X:= FIndex div LineSize;
+  if (Y = 0) then begin //Grow the DB
+    SetLength(SliceDB[X], LineSize); //Allocate a new line.
+  end;
+  SliceDB[X][Y]:= Slice;
+  //Only commit the slice to the DB if it is unique.
+  if NoDupsDict.TryAdd(FIndex, FIndex) then begin
+    Result:= FIndex;
+    Inc(FIndex);
+  end else begin
+    //The Slice already exists, return its index
+    NoDupsDict.TryGetValue(FIndex, Result);
+  end;
+end;
+
+
+
+{ TSliceResult }
+
+constructor TSliceResult.Create(NE, SW: integer; Change: TSliverChanges);
+begin
+  Self.NE:= NE;
+  Self.SW:= SW;
+  Self.Changes:= Change;
+end;
+
+{ TDictGrid }
+
+procedure TDictGrid.Clear;
+begin
+  for var i:= 0 to FSizeX*FSizeY-1 do begin
+    FData[i]:= TSliceDict.Invalid;
+  end;
+end;
+
+function TDictGrid.Clone: TDictGrid;
+begin
+  Result:= TDictGrid.Create(Self);
+  Move(FData[0], Result.FData[0], SizeOf(integer) * FSizeX * FSizeY);
+end;
+
+constructor TDictGrid.Create(SizeX, SizeY: integer);
+begin
+  if GlobalDict = nil then GlobalDict:= TSliceDict.Create;
+  FDict:= GlobalDict;
+  FIsValid:= true;
+  FSizeX:= SizeX;
+  FSizeY:= SizeY;
+  SetLength(FData, FSizeX*FSizeY);
+  for var i:= 0 to FSizeX * FSizeY-1 do begin
+    FData[i]:= TSliceDict.Unknown;
+  end;
+  //FDebugGrid:= TGrid.Create(SizeX, SizeY);
+end;
+
+constructor TDictGrid.Create(const Template: TDictGrid);
+begin
+  Create(Template.FSizeX, Template.FSizeY);
+end;
+
+procedure TDictGrid.Overwrite(var GridToBeOverwritten: TDictGrid);
+begin
+  Assert((GridToBeOverwritten.FSizeX = FSizeX) and (GridToBeOverwritten.FSizeY = FSizeY));
+  Move(FData[0], GridToBeOverwritten.FData[0], SizeOf(integer) * FSizeX * FSizeY);
+end;
+
+procedure TDictGrid.SetItems(x, y: integer; const Value: integer);
+begin
+  var i:= x+y*FSizeX;
+  FData[i]:= Value;
+  //FDebugGrid.FData[i]:= Self.FDict.SliceDB[0][Value];
+end;
+
+function TDictGrid.SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if x < (MinMax.Right) then begin
+      var IndexEast:= IndexCenter+1;
+      //If there is a problem the sliver will be invalid.
+      FDict.EW(FData[IndexEast], FData[IndexCenter], Result);
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y < (MinMax.Bottom) then begin
+      var IndexSouth:= IndexCenter + FSizeX;
+      FDict.NS(FData[IndexCenter], FData[IndexSouth], Result);
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+end;
+
+function TDictGrid.SliverSolveReverseOld(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if x > (MinMax.Left) then begin
+      var IndexWest:= IndexCenter-1;
+      //If there is a problem the sliver will be invalid.
+      FDict.EW(FData[IndexCenter], FData[IndexWest], Result);
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y > (MinMax.top) then begin
+      var IndexNorth:= IndexCenter - FSizeX;
+      FDict.NS(FData[IndexNorth], FData[IndexCenter], Result);
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+end;
+
+function TDictGrid.GetUniqueSolutionOld: TSliverChanges;
+const
+  HasUniqueSolution = 513;
+var
+  MinCount: integer;
+begin
+  var MinSlice:= GetMinSlice(MinCount);
+  //If we cannot find a count other than 1, then we have reached a unique solution.
+  if (MinCount = HasUniqueSolution) then begin
+    Exit(TSliverChanges.Changed);
+  end;
+  //var DebugMinSlice: PSlice;
+  //var DebugMinCount: integer;
+  //FDebugGrid.GetMinSlice(DebugMinSlice, DebugMinCount);
+  //Assert(DebugMinCount = MinCount);
+  //Explore each of the alternatives recursively
+  var Clone:= Self.Clone;
+  //var DebugClone:= Self.FDebugGrid.Clone;
+  var Index:= -1;
+  //var DebugIndex:= -1;
+  for var i:= 0 to MinCount -1 do begin
+    Index:= Slices[MinSlice].NextSetBit(Index); //Get the next constellation
+    //DebugIndex:= DebugMinSlice.NextSetBit(DebugIndex);
+    //Assert(Index = DebugIndex);
+    FData[MinSlice]:= Index; //MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+    //DebugMinSlice.ForceSingleBit(DebugIndex);
+    //solve the grid
+    //starting at the pivot (this saves about 10%).
+    var Changes:= Self.GridSolveOld(Rect(0,0,9,9), MinSlice); //if we're lucky then there is no solution
+    if Changes.IsValid then begin
+      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+      Result:= GetUniqueSolutionOld; //Depth first search for a solution.
+      if Result.IsValid then Exit;   //Early out when we have a unique solution
+    end;
+    //No single solution? then reset the grid and try the next constellation
+    //if (i < (MinCount-1)) then begin
+      Clone.Overwrite(Self);
+      //DebugClone.Overwrite(Self.FDebugGrid);
+    //end;
+  end; {for i}
+    //We have now reduced our grid to only those states that are valid upon first inspection.
+    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+  Result:= TSliverChanges.Invalid
+end;
+
+//Solve the grid starting at the given index.
+function TDictGrid.GridSolveOld(const Bounds: TRect; IndexStart: integer = -1): TSliverChanges;
+var
+  x, y: integer;
+  ChangeCount: integer;
+label
+  Done,
+  Start;
+begin
+  ChangeCount:= 0;
+  if IndexStart <> -1 then begin
+    x:= IndexStart mod FSizeX;
+    y:= IndexStart div FSizeX;
+    goto Start;
+  end;
+  repeat
+    ChangeCount:= 0;
+//    y:= Bounds.Top;
+//    while y <= Bounds.Bottom do begin
+    for y := Bounds.Top to Bounds.Bottom do begin
+      for x:= Bounds.Left to Bounds.Right do begin
+//      x:= Bounds.Left;
+//      while x <= Bounds.Right do begin
+//Start: - this is slower than the other position
+        Result:= SliverSolveOld(x, y, Bounds);
+        //var Result2:= FDebugGrid.SliverSolveOld(x,y,Bounds);
+        //if (Result <> Result2) then begin
+        //  Assert(Result = Result2);
+        //end;
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+        //inc(x);
+      end; { while x }
+      //inc(y);
+    end; { while y }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    y:= Bounds.Bottom;
+    while y >= Bounds.Top do begin
+      x:= Bounds.Right;
+      while x >= Bounds.Left do begin
+Start: //32ms (above) vs 29 ms (here), keep the start here.
+        Result:= SliverSolveReverseOld(x, y, Bounds);
+        //var Result2:= FDebugGrid.SliverSolveReverseOld(x,y,Bounds);
+        //if (Result <> Result2) then begin
+        //  Assert(Result = Result2);
+        //end;
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result;
+        Dec(x);
+      end; { while x }
+      Dec(y);
+    end; { while y }
+  until (ChangeCount = 0);
+Done:
+  Self.FIsValid:= Result.IsValid;
+end;
+
+
+
+function TDictGrid.GetMinSlice(out MinCount: integer): integer;
+begin
+  MinCount:= 513; //Make sure we always get a hit.
+  Result:= -1;
+  for var i:= 0 to FSizeX * FSizeY-1 do begin
+    var iCount:= Self.Slices[i].PopCount;
+    if (iCount < MinCount) and (iCount > 1) then begin
+      MinCount:= iCount;
+      Result:= i;
+      if (MinCount = 2) then exit;
+    end;
+  end; {for i}
+end;
+
+function TDictGrid.GetSlices(index: integer): PSlice;
+begin
+  Result:= Self.FDict.Item[FData[index]];
+end;
+
+function TDictGrid.GetSlicesXY(x, y: integer): PSlice;
+begin
+  Result:= Self.FDict.Item[FData[x + y*FSizeX]];
+end;
+
+{TNoDupsDictComparer<integer> }
+
+constructor TNoDupsDictComparer.Create(Parent: TSliceDict);
+begin
+  inherited Create;
+  FParent:= Parent;
+end;
+
+function TNoDupsDictComparer.Equals(const Left, Right: integer): Boolean;
+begin
+  Result:= FParent.Item[Left]^ = FParent.Item[Right]^
+end;
+
+function TNoDupsDictComparer.GetHashCode(const Value: integer): Integer;
+begin
+  Result:= FNV1A_Hash_Meiyan(FParent.Item[Value]^, SizeOf(TSlice), FParent.LineSize);
+end;
+
+{ TSliceDictionaryComparer }
+
+function TSliceDictionaryComparer.Equals(const Left, Right: IntPair): Boolean;
+begin
+  Result:= Int64(Left) = Int64(Right);
+end;
+
+function TSliceDictionaryComparer.GetHashCode(const Value: IntPair): Integer;
+begin
+  Result:= FNV1A_Hash_Meiyan(Value, SizeOf(Value), 4515722);
+end;
+
+
 end.
+
