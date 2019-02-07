@@ -135,7 +135,7 @@ type
       1: (b: array[0..MaxBytesPerUnit] of byte);
       2: (w: array[0..(BytesPerUnit div 2)-1] of word);
       3: (i: array[0..(BytesPerUnit div 4)-1] of integer);
-      4: (q: array[0..(BytesPerUnit div 8)-1] of int64);
+      4: (Data8: array[0..(BytesPerUnit div 8)-1] of int64);
   end;
 
 
@@ -203,6 +203,7 @@ type
   TAbstractNode = class
   private
     class var Generation: int64;
+    class var FEmptyBlock: TAbstractNode;
   private
     FLevel: integer;
     ///  Every node stores the real x/y coordinate of its 0,0 point here.
@@ -310,6 +311,8 @@ type
   ///  or more TNodes in its SubNodes.
   /// </summary>
   TNode = class(TAbstractNode)
+  private
+    class constructor Init;
   public
     function GeneratePtoQ: TGenerateStatus; override;
     function GenerateQtoP: TGenerateStatus; override;
@@ -367,6 +370,7 @@ end;
 
 function TAbstractNode.goNorth(index: integer): TAbstractNode;
 begin
+  if Self = nil then Exit(FEmptyBlock);
   if index in [0..7] then begin
     Result:= FParent.GoNorth(index).GetSubNode(index + North + 64);
   end else Result:= FParent.GetSubNode(index + North);
@@ -374,6 +378,7 @@ end;
 
 function TAbstractNode.goWest(index: integer): TAbstractNode;
 begin
+  if Self = nil then Exit(FEmptyBlock);
   if (index and 7) = 0 then begin
     Result:= FParent.GoWest(index).GetSubNode(index + West + 8)
   end else Result:= FParent.GetSubNode(index + West);
@@ -410,6 +415,7 @@ end;
 
 function TAbstractNode.goNorthWest(index: integer): TAbstractNode;
 begin
+  if Self = nil then Exit(FEmptyBlock);
   if index = 0 then Result:= FParent.GoNorthWest(index).GetSubNode(63)
   else if (index in [1..7]) then Result:= FParent.GoNorth(index).GetSubNode(index + NorthWest + 64)
   else if ((index and 7)=0) then Result:= FParent.GoWest(index).GetSubNode(index + NorthWest + 8)
@@ -444,6 +450,11 @@ end;
 function TNode.GetSubNode(x,y: integer): TAbstractNode;
 begin
   Result:= FSubNodes[GetNodeIndex(x,y)];
+end;
+
+class constructor TNode.Init;
+begin
+  FEmptyBlock:= TNode.Create(0,0,nil);
 end;
 
 constructor TNode.Create(X, Y: integer; Parent: TNode);
@@ -605,7 +616,7 @@ function TCellBlock.CalculatePtoQ_16_4x4_Blocks(const input: TArray<int64>): Int
         dec(l);
         if (l < 0) then break;
       end;
-      p[(i and 2) * 2].q[i and 1]:= output;
+      p[(i and 2) * 2].Data8[i and 1]:= output;
       if (l < 0) then exit;
     end;
   end;
@@ -758,11 +769,11 @@ begin
     N:= @p[NIndex];
     W:= @p[WIndex];
     NW:= @p[NWIndex];
-    if i < 4 then begin
+    if i < 4 then begin //If we are in the topmost row, then recruit the N and NW block.
       N:= @TCellBlock(bN).p[Nindex + 32];
       NW:= @TCellBlock(bNW).p[NWIndex + 32];
     end;
-    if not(boolean(i and 3)) then begin
+    if not(boolean(i and 3)) then begin //if we are in the westmost column, recruit W and NW
       W:= @TCellBlock(bW).p[WIndex + 4];
       NW:= @TCellBlock(bNW).p[NWIndex + 4];
     end;
@@ -856,6 +867,7 @@ class constructor TCellBlock.Init;
 begin
   FillChar(FEmpty, SizeOf(FEmpty), #0);
   QState:= false; //start with pstate.
+  FEmptyBlock:= TCellBlock.Create;
 end;
 
 const Shuffle8bytesToRight: array[0..15] of byte = (00,$FF,01,$FF,02,$FF,03,$FF,04,$FF,05,$FF,06,$FF,07,$FF);
@@ -1337,26 +1349,26 @@ end;
 { TUnit }
 class operator TUnit.BitwiseAnd(const A, B: TUnit): TUnit;
 begin
-  Result.q[0]:= A.q[0] and B.q[0];
-  Result.q[1]:= A.q[1] and B.q[1];
+  Result.Data8[0]:= A.Data8[0] and B.Data8[0];
+  Result.Data8[1]:= A.Data8[1] and B.Data8[1];
 end;
 
 class operator TUnit.BitwiseOr(const A, B: TUnit): TUnit;
 begin
-  Result.q[0]:= A.q[0] or B.q[0];
-  Result.q[1]:= A.q[1] or B.q[1];
+  Result.Data8[0]:= A.Data8[0] or B.Data8[0];
+  Result.Data8[1]:= A.Data8[1] or B.Data8[1];
 end;
 
 class operator TUnit.BitwiseXor(const A, B: TUnit): TUnit;
 begin
-  Result.q[0]:= A.q[0] xor B.q[0];
-  Result.q[1]:= A.q[1] xor B.q[1];
+  Result.Data8[0]:= A.Data8[0] xor B.Data8[0];
+  Result.Data8[1]:= A.Data8[1] xor B.Data8[1];
 end;
 
 procedure TUnit.Clear;
 begin
-  Self.q[0]:= 0;
-  Self.q[1]:= 0;
+  Self.Data8[0]:= 0;
+  Self.Data8[1]:= 0;
 end;
 
 procedure TUnit.Display(const BitmapStart: pointer; const LineOffset: integer);
@@ -1411,8 +1423,8 @@ end;
 
 class operator TUnit.LogicalNot(const A: TUnit): TUnit;
 begin
-  Result.q[0]:= not(A.q[0]);
-  Result.q[1]:= not(A.q[0]);
+  Result.Data8[0]:= not(A.Data8[0]);
+  Result.Data8[1]:= not(A.Data8[0]);
 end;
 
 function TUnit.OffsetToE: TDual<TUnit>;

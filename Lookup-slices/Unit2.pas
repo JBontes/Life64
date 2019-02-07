@@ -706,6 +706,8 @@ type
     function Validate(const Reference: TGridBitmap): boolean;
     function UnknownFuture: TGridBitmap;
 
+    procedure SetKnownPixel(x,y: integer; state: boolean = true);
+    procedure SetUnknownPixel(x,y: integer; state: boolean = true);
     class function Empty: TGridBitmap; static;
     class function Full: TGridBitmap; static;
     procedure MaskOffUnknown;
@@ -812,9 +814,13 @@ type
     FSliceDictionaryComparer: TSliceDictionaryComparer;
     FNoDupsComparer: TNoDupsDictComparer;
     SliceDB: TArray<TArray<TSlice>>;  //2D array, every element is 1024*1024 slices.
+    PopcountDB: TArray<TArray<integer>>; //2D array, every element is 1024*1024 slices.
     NoDupsDict: TDictionary<integer, integer>; //Make sure we don't insert duplicate slices in the SliceDB
     //Store the Slices in a 2D array so that upon expansion we don't have to move data.
     FIndex: integer;
+    FEWLookups: integer;
+    FNSLookups: integer;
+    FSliceQueries: integer;
   public
     /// <summary>
     ///  Add the unity slices 1..512 and the yes/no slices.
@@ -832,10 +838,17 @@ type
     ///  Return the new East and West Indexes and report back on the changes.
     /// </summary>
     procedure EW(var East, West: integer; out Changes: TSliverChanges);
-  private
+    procedure Clean;
+  public
     function GetItem(index: integer): PSlice;
+    function GetPopcount(index: integer): integer;
     function InsertSlice(const Slice: TSlice): integer;
+    procedure Init;
     property Item[index: integer]: PSlice read GetItem; default;
+    property EWLookups: integer read FEWLookups;
+    property NSLookups: integer read FNSLookups;
+    property SliceQueries: integer read FSliceQueries;
+    property Popcount[index: integer]:integer read GetPopcount;
   end;
 
 
@@ -872,6 +885,7 @@ type
     /// </summary>
     FIsValid: boolean;
     FData: TArray<TSlice>;
+    FFutureBitmap: TGridBitmap;
     //FData: array[0..255] of TSlice;  //to be replaced by a variable size structure later
     function GetSlice(const Coordinate: TPoint): TSlice; overload; inline;
     procedure SetSlice(const Coordinate: TPoint; const Value: TSlice); overload; inline;
@@ -935,6 +949,9 @@ type
     ///  original grid.
     /// </summary>
     function GetPastGrid(AllowGrowth: boolean): TGrid;
+    function GridSolveOldSingleSweep(const Bounds: TRect): TSliverChanges;
+    function GetUniqueSolutionOldSingleSweep: TSliverChanges;
+    function Validate: boolean;
   public type
     /// <summary>
     ///  After the basic overlapping of gridwalker has run out of steam
@@ -1076,6 +1093,7 @@ type
     property Item[const Coordinate: TPoint]: TSlice read GetSlice write SetSlice; default;
     property Item[x,y: integer]: TSlice read GetSlice write SetSlice; default;
     property Item[i: integer]: TSlice read GetSlice write SetSlice; default;
+    property FutureBitmap: TGridBitmap read FFutureBitmap write FFutureBitmap;
   end;
 
   TDictGrid = record
@@ -1084,8 +1102,10 @@ type
     FData: TArray<integer>;   //Every slice in the structure is represented by an index
     FDict: TSliceDict;
     FIsValid: boolean;
+    FFutureBitmap: TGridBitmap;
     //FDebugGrid: TGrid;
     function GetSlices(index: integer): PSlice; inline;
+    function GetPopCount(index: integer): integer; inline;
     function GridSolveOld(const Bounds: TRect; IndexStart: integer = -1): TSliverChanges;
     procedure SetItems(x, y: integer; const Value: integer);
     function GetSlicesXY(x, y: integer): PSlice; inline;
@@ -1106,9 +1126,11 @@ type
     function GetMinSlice(out MinCount: integer): integer;
     property Slices[index: integer]: PSlice read GetSlices;
     property SlicesXY[x,y: integer]: PSlice read GetSlicesXY;
+    property Popcount[index: integer]: integer read GetPopcount;
     property Items[x,y: integer]: integer write SetItems; default; //write-only property
     property SizeX: integer read FSizeX;
     property SizeY: integer read FSizeY;
+    property FutureBitmap: TGridBitmap read FFutureBitmap write FFutureBitmap;
   end;
 
   /// <summary>
@@ -1254,6 +1276,10 @@ type
     Btn5x5To3x3_Lookup: TButton;
     BtnOldNewSolveInLockstep: TButton;
     BtnDictSolveAndTime: TButton;
+    BtnOld_SolveAndTimeSingleSweep: TButton;
+    Label_dict_size: TLabel;
+    Button2: TButton;
+    BtnSaveLoad: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1308,6 +1334,9 @@ type
     procedure Btn5x5To3x3_LookupClick(Sender: TObject);
     procedure BtnOldNewSolveInLockstepClick(Sender: TObject);
     procedure BtnDictSolveAndTimeClick(Sender: TObject);
+    procedure BtnOld_SolveAndTimeSingleSweepClick(Sender: TObject);
+    procedure Button2Click(Sender: TObject);
+    procedure BtnSaveLoadClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -1580,6 +1609,7 @@ end;
 {$ENDIF}
 {$IFDEF CPUX64}
 asm
+{ TSliceDict }
 .NOFRAME
     // ECX = STR
     // EDX = len
@@ -2149,6 +2179,13 @@ begin
   else Result:= ZeroSlice;
 end;
 
+procedure FutureGridToBitmap(const SG: TStringGrid; col, row: integer; var Bitmap: TGridBitmap);
+begin
+  if (SG.Cells[col, row] = 'X') then Bitmap.SetKnownPixel(col,row,true)
+  else if (SG.Cells[col, row] = '?') then Bitmap.SetUnknownPixel(col,row)
+  else Bitmap.SetKnownPixel(col,row,false);
+end;
+
 function FutureGridToPastDictSliceSimple(const SG: TStringGrid; col, row: integer; const LookupTable: TLookupTable): integer;
 begin
   if (SG.Cells[col, row] = 'X') then Result:= 1
@@ -2582,16 +2619,17 @@ begin
   var ResultEW:= DoEW;
   if ResultEW.IsInvalid then Exit(ResultEW);
   var ResultNS:= DoNS;
-  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-  //The center keeps changing, loop until it stabilizes
-  while True do begin
-    //Looping until changes stabilize makes a small difference +/- 5% savings.
-    ResultEW:= DoEW;
-    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
-    //We hardly ever reach this point
-    ResultNS:= DoNS;
-    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-  end;
+  Exit(ResultNS or ResultEW);
+//  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+//  //The center keeps changing, loop until it stabilizes
+//  while True do begin
+//    //Looping until changes stabilize makes a small difference +/- 5% savings.
+//    ResultEW:= DoEW;
+//    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+//    //We hardly ever reach this point
+//    ResultNS:= DoNS;
+//    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+//  end;
 end;
 
 // Solve the given sliver with its neighbors to the East and South
@@ -2628,16 +2666,17 @@ begin
   var ResultEW:= DoEW;
   if ResultEW.IsInvalid then Exit(ResultEW);
   var ResultNS:= DoNS;
-  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-  //The center keeps changing, loop until it stabilizes
-  while True do begin
-    //Looping until changes stabilize makes a small difference +/- 5% savings.
-    ResultEW:= DoEW;
-    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
-    //We hardly ever reach this point
-    ResultNS:= DoNS;
-    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-  end;
+  Exit(ResultNS or ResultEW);
+//  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+//  //The center keeps changing, loop until it stabilizes
+//  while True do begin
+//    //Looping until changes stabilize makes a small difference +/- 5% savings.
+//    ResultEW:= DoEW;
+//    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+//    //We hardly ever reach this point
+//    ResultNS:= DoNS;
+//    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+//  end;
 end;
 
 
@@ -4587,13 +4626,21 @@ begin
 end;
 
 function TForm2.FindBoundingBox: TRect;
+var
+  SG: TStringGrid;
+
+  function IsSet(x,y: integer): boolean;
+  begin
+    Result:= (SG.Cells[x,y] <> '') and (SG.Cells[x,y][1] in ['X','?']);
+  end;
+
 begin
-  var SG:= StringGrid1;
+  SG:= StringGrid1;
   Result:= Rect(-1,-1,-1,-1);
   //Find the top row
   for var y := 0 to SG.RowCount-1 do begin
     for var x := 0 to SG.ColCount-1 do begin
-      if SG.Cells[x,y][1] in ['X','?'] then begin
+      if IsSet(x,y) then begin
         Result.Top:= Y;
         break;
       end;
@@ -4603,7 +4650,7 @@ begin
   //Find the bottom row
   for var y := SG.RowCount-1 downto 0 do begin
     for var x := 0 to SG.ColCount-1 do begin
-      if SG.Cells[x,y][1] in ['X','?'] then begin
+      if IsSet(x,y) then begin
         Result.Bottom:= Y;
         break;
       end;
@@ -4613,7 +4660,7 @@ begin
   //Left
   for var x := 0 to SG.ColCount-1 do begin
     for var y := 0 to SG.RowCount-1 do begin
-      if SG.Cells[x,y][1] in ['X','?'] then begin
+      if IsSet(x,y) then begin
         Result.Left:= X;
         break;
       end;
@@ -4623,7 +4670,7 @@ begin
   //Right
   for var x := SG.ColCount-1 downto 0 do begin
     for var y := 0 to SG.RowCount-1 do begin
-      if SG.Cells[x,y][1] in ['X','?'] then begin
+      if IsSet(x,y) then begin
         Result.Right:= X;
         break;
       end;
@@ -4641,12 +4688,14 @@ begin
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
   var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
   var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
   for var x:= BoundingRect.Left to BoundingRect.Right do begin
     for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
       //if (x in [0,1,8,9]) or (y in [0,1,8,9]) then begin
         MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
+        FutureGridToBitmap(StringGrid1,x,y,MySlices.FFutureBitmap);
 //      end else begin
 //        //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
 //        MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
@@ -4684,6 +4733,7 @@ begin
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
   var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
   var MySlices:= TDictGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
   for var x:= BoundingRect.Left to BoundingRect.Right do begin
@@ -4718,6 +4768,8 @@ begin
   end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
+  Label_dict_size.Caption:= 'SliceDB: '+GlobalDict.Findex.ToString+' NS Dict: '+GlobalDict.NSDictionary.Count.ToString+' EW Dict: '+GlobalDict.EWDictionary.Count.ToString+' NS lookups: '+GlobalDict.NSLookups.ToString + ' EW Lookups: '+GlobalDict.EWLookups.ToString+ ' SliceQueries: '+GlobalDict.SliceQueries.ToString;
+  Form2.Caption:= Label_dict_size.Caption;
 end;
 
 
@@ -4740,6 +4792,8 @@ begin
   // FS.Read64(TBytes(LookupTable), 0, FS.Size);
   // FS.Free;
   var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
+
   var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
   // Get the slice data from the grid, by looking it up in the lookup table
   for var x:= BoundingRect.Left to BoundingRect.Right do begin
@@ -4767,6 +4821,119 @@ begin
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
 
+
+procedure TForm2.Button2Click(Sender: TObject);
+begin
+  GlobalDict.Clean;
+end;
+
+procedure TForm2.BtnSaveLoadClick(Sender: TObject);
+var
+  Line: TArray<string>;
+  FileDialog: TCustomFileDialog;
+begin
+  var BoundingRect:= FindBoundingBox;
+  var SL:= TStringList.Create;
+  var SG:= StringGrid1;
+  SL.LineBreak:= #10; //Linux line breaks
+  try
+    var DoLoad:= (BoundingRect = Rect(-1,-1,-1,-1));
+    var Caption:= 'Save a pattern file';
+    FileDialog:= FileSaveDialog1;
+    if DoLoad then begin
+      Caption:= 'Load a pattern file';
+      FileDialog:= FileOpenDialog1;
+    end;
+    FileDialog.Title:= Caption;
+    if not(FileDialog.Execute) then exit;
+    if DoLoad then begin
+      SL.LoadFromFile(FileDialog.Filename, TEncoding.ASCII);
+      if SL.Count = 0 then exit;
+      var StartY:= (SG.RowCount - SL.Count) div 2;
+      if StartY < 0 then exit;
+      //Assume all lines are the same length
+      Line:= SL[0].Split([',']);
+      var StartX:= (SG.ColCount - Length(Line)) div 2;
+      if StartX < 0 then Exit;
+      for var y:= StartY to StartY + SL.Count -1 do begin
+        var y1:= y - StartY;
+        Line:= SL[Y1].Split([',']);
+        for var x:= StartX to StartX + Length(Line) - 1 do begin
+          var x1:= x - StartX;
+          if Line[x1] = '' then exit; //an error in the file
+          case Line[x1][1] of
+            '0': SG.Cells[x,y]:= ' ';
+            '1': SG.Cells[x,y]:= 'X';
+            '*': SG.Cells[x,y]:= '?';
+          end;
+        end; {for x}
+      end; {for y}
+    end else begin
+      for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
+        SL.Add('');
+        for var x:= BoundingRect.Left to BoundingRect.Right do begin
+        var C: Char;
+        if SG.Cells[x,y] = '' then C:= '0'
+        else case SG.Cells[x,y][1] of
+          ' ': C:= '0';
+          'X': C:= '1';
+          '?': C:= '*';
+        end;
+        var y1:= y - BoundingRect.Top;
+        SL[y1]:= SL[y1] + C;
+        if x < BoundingRect.Right then SL[y1]:= SL[y1] + ',';
+        end; {for x}
+      end; {for y}
+      SL.SaveToFile(FileDialog.Filename, TEncoding.ASCII);
+    end;
+  finally
+    SL.Free;
+  end;
+end;
+
+procedure TForm2.BtnOld_SolveAndTimeSingleSweepClick(Sender: TObject);
+begin
+  // Read the lookup table
+  // if not FileOpenDialog1.Execute then Exit;
+  // FS:= TFileStream.Create(FileOpenDialog1.FileName, fmOpenRead);
+  // SetLength(LookupTable, FS.Size div SizeOf(TSlice));
+  // FS.Read64(TBytes(LookupTable), 0, FS.Size);
+  // FS.Free;
+  var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
+  var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
+  // Get the slice data from the grid, by looking it up in the lookup table
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
+      //if (x in [0,1,8,9]) or (y in [0,1,8,9]) then begin
+        MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
+//      end else begin
+//        //MySlices[x, y]:= FutureGridToPastSliceMini(StringGrid1, x+3, y+3, LookupTable, oCenter);
+//        MySlices[x, y]:= FutureGridToPastSlice(StringGrid1, x+3, y+3, LookupTable, oCenter);
+//      end;
+      //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+      StringGrid3.Cells[x-1, y-1]:= '';
+    end;
+  end;
+  //Start the timer
+  var Timer:= THiResStopWatch.StartNew;
+
+  var Status:= MySlices.GridSolveOldSingleSweep(MySlices.BoundingRect);
+  //var ValidSolutions: TArray<TGrid>;
+  //var ValidCount:= 0;
+  //SetLength(ValidSolutions, 100);
+  //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolutionOldSingleSweep;//(ValidSolutions, ValidCount);
+  //Label1.Caption:= ValidCount.ToString;
+  Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
+  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
+  if Timer.ElapsedMilliseconds > 0 then begin
+    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+  end;
+  if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
+  else Memo1.Lines.Add('SAT - Pattern has a solution');
+end;
 
 procedure TForm2.BtnValidateCompressedLookupTableClick(Sender: TObject);
 var
@@ -4878,11 +5045,27 @@ begin
 end;
 
 procedure TForm2.BtnSearchGoEClick(Sender: TObject);
+const
+  SearchCount = 50;
+var
+  Stats: TStringGrid;
 begin
+  Stats:= TStringGrid.Create(nil);
+  var CSV:= TStringList.Create;
+  try
+  Stats.ColCount:= 12;
+  Stats.RowCount:= SearchCount * SearchCount * SearchCount {* SearchCount};
+
   Assert(Flip45($1FFFFFF) = $1FFFFFF);
   Assert(Flip45Part($119DFF) = $1FFFFFF);
   EnableAllCPUCores;
   BtnSearchGoE.Enabled:= false;
+  var OldSliceDB:= 0;
+  var OldSliceQueries:= 0;
+  var OldNSDict:= 0;
+  var OldNSQueries:= 0;
+  var OldEWDict:= 0;
+  var OldEWQueries:= 0;
 
 
   if Length(CountsTable) = 0 then begin
@@ -4905,16 +5088,17 @@ begin
       end
     ));
   end;
-  Parallel.Async(procedure begin
-    var ZeroSlice:= LookupTable[0,oCenter];
-    var OneSlice:= not(ZeroSlice);
-    Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
-      var Grid:= TGrid.Create(10,10);
-    //for var NW:= 0 to 100 do begin
-      for var SW:= 0 to 100 do begin
+  //Parallel.Async(procedure begin
+    var ZeroSlice:= TSliceDict.Zero;  //LookupTable[0,oCenter];
+    var OneSlice:= TSliceDict.One;//not(ZeroSlice);
+    var Row:= 0;
+    //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+      var Grid:= TDictGrid.Create(10,10);
+      for var NW:= 0 to SearchCount-1 do begin
+      for var SW:= 0 to SearchCount-1 do begin
         TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
-        for var SE:= 0 to 100 do begin
-          for var NE:= 0 to 100 do begin
+        //for var SE:= 0 to SearchCount-1 do begin
+          for var NE:= 0 to SearchCount-1 do begin
 
             var iNW:= CountsIndex[NW];
             var iSE:= Flip45(iNW);
@@ -4934,20 +5118,55 @@ begin
             //The grid is set, let's solve it.
             if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then begin
               //We have found a GoE.
-              TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+              //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
             end else begin
               //Not yet, keep looking
               if Grid.GetUniqueSolutionOld.IsInvalid then begin
                 //We have found a GoE
-                TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+                //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
               end;
             end;
+            //Add statistics to the list.
+
+            //Individual counts
+            Stats.Cells[0,Row]:= (Grid.FDict.FIndex - OldSliceDB).ToString;
+            Stats.Cells[1,Row]:= (Grid.FDict.FSliceQueries - OldSliceQueries).ToString;
+            Stats.Cells[2,Row]:= (Grid.FDict.NSDictionary.Count - OldNSDict).ToString;
+            Stats.Cells[3,Row]:= (Grid.FDict.FNSLookups - OldNSQueries).ToString;
+            Stats.Cells[4,Row]:= (Grid.FDict.EWDictionary.Count - OldEWDict).ToString;
+            Stats.Cells[5,Row]:= (Grid.FDict.FEWLookups - OldEWQueries).ToString;
+
+            //Cumulative
+            Stats.Cells[6,Row]:= (Grid.FDict.FIndex).ToString;
+            Stats.Cells[7,Row]:= (Grid.FDict.FSliceQueries).ToString;
+            Stats.Cells[8,Row]:= (Grid.FDict.NSDictionary.Count).ToString;
+            Stats.Cells[9,Row]:= (Grid.FDict.FNSLookups).ToString;
+            Stats.Cells[10,Row]:= (Grid.FDict.EWDictionary.Count).ToString;
+            Stats.Cells[11,Row]:= (Grid.FDict.FEWLookups).ToString;
+
+            OldSliceDB:= Grid.FDict.FIndex;
+            OldSliceQueries:= Grid.FDict.FSliceQueries;
+            OldNSDict:= Grid.FDict.NSDictionary.Count;
+            OldNSQueries:= Grid.FDict.FNSLookups;
+            OldEWDict:= Grid.FDict.EWDictionary.Count;
+            OldEWQueries:= Grid.FDict.FEWLookups;
+
+            Inc(Row);
           end; {for NE}//end); {parallel.for}
-        end; {for SE}
+        //end; {for SE}
       end; {for SW}
-    end); {for parallel NW}
-    TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
-  end); //TTask.run
+    end; {for NW}//); {for parallel NW}
+    //TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
+    BtnSearchGoE.Enabled:= true;
+  //end); //TTask.run
+  for var i := 0 to Stats.RowCount-1 do begin
+    CSV.Add(Stats.Rows[i].CommaText)
+  end; {for i}
+  CSV.SaveToFile('stats.txt');
+  finally
+    CSV.Free;
+    Stats.Free;
+  end;
 end;
 
 //deprecated
@@ -5673,12 +5892,14 @@ function TSlice.GetBitmap(out KnownBitmap, UnknownBitmap: UInt64): TSliverChange
 var
   OnBitmap: integer;
   OffBitmap: integer;
-  i: integer;
   Index: integer;
+
+
 begin
   OnBitmap:= 0;
   OffBitmap:= -1;
   Index:= NextSetBit(-1);
+  Result:= TSliverChanges.UnChanged; //Assume all is OK
 
   //We follow a multi-pronged strategy.
   //After a simple sanity check to see if the slice is valid
@@ -5687,15 +5908,23 @@ begin
 
   //If more than half of the positions are filled, then no single pixel can be known
 
-  //Else we do a check against a bitmask per pixel.
-  //There are 9 pixels, so 9 checks.
+
   case Self.PopCount of
-    0: Exit(TSliverChanges.Invalid);    //Do not stress about the fact that our out parameters are undefined.
-    1..16: begin
+    0: begin
+      Exit(TSliverChanges.Invalid);    //There is no valid constellation.
+      UnknownBitmap:= 511;             //disable compiler warnings all the same
+      KnownBitmap:= 0;
+    end;
+    1: begin
+      KnownBitmap:= Index;
+      UnknownBitmap:= 0;
+    end;
+    2..8: begin
       while (Index < 512) do begin
         OnBitmap:= OnBitmap or Index;       //OR only adds pixels
         OffBitmap:= OffBitmap and Index;    //AND only subtracts pixels
         if (OnBitmap xor OffBitmap) = 511 then break; //stop sampling if all pixels are unknown
+        Index:= NextSetBit(Index);
       end; {while}
       KnownBitmap:= (OnBitmap and OffBitmap);
       UnknownBitmap:= (OnBitmap xor OffBitmap);
@@ -5704,8 +5933,10 @@ begin
       UnknownBitmap:= 511;
       KnownBitmap:= 0;
     end
+    //Else we do a check against a bitmask per pixel.
+    //There are 9 pixels, so 9 checks.
     else begin
-      for i:= 0 to 8 do begin
+      for var i:= 0 to 8 do begin
         if ((Self and BitMask[i]) = Self) then KnownBitmap:= KnownBitmap or (1 shl i)
         else UnknownBitmap:= UnknownBitmap or (1 shl i);
       end;
@@ -7356,8 +7587,9 @@ var
   FragmentStatus: TSliverChanges;
   OutOfBounds: TOutOfBounds;
 begin
+  Result:= TGridBitmap.Empty;
   MaxX:= Min(StartX + (16-1), (FSizeX-1));
-  MaxY:= Min(StartX + (4+1), (FSizeY-1));
+  MaxY:= Min(StartY + (16-1), (FSizeY-1));
   //A bitmap is a row of 16 pixels numbered like so FEDCBA9876543210
   //The least significant bytes are on top and the rows gets more significant going down.
   //Every pixel is one bit.
@@ -7367,9 +7599,9 @@ begin
   //-------------876
   //----------------
   Y:= StartY;
-  X:= StartX;
   Spillage:= Rect(0,0,0,0);   //Assume no spillage
   while Y <= MaxY do begin
+    X:= StartX;
     while X <= MaxX do begin
       FragmentStatus:= Item[x,y].GetBitmap(KnownFragment, UnknownFragment);
       if (FragmentStatus.IsInvalid) then Exit(TGridBitmap.Empty); //It is pointless to calculate
@@ -7423,11 +7655,9 @@ begin
 end;
 
 function TGrid.Clone: TGrid;
-var
-  Count: integer;
 begin
   Result:= TGrid.Create(Self);
-  Count:= FSizeX * FSizeY;
+  var Count:= FSizeX * FSizeY;
   if (Count = 0) then exit;
   Move(Self.FData[0], Result.FData[0], Count * SizeOf(TSlice));
   Result.FActive:= Self.FActive;
@@ -7438,7 +7668,6 @@ begin
   var Count:= FSizeX * FSizeY;
   Move(Self.FData[0], GridToBeOverwritten.FData[0], Count * SizeOf(TSlice));
   GridToBeOverwritten.FActive:= Self.FActive;
-  //System.Move(Self.FData[0], GridToBeOverwritten.FData[0], Count * SizeOf(TSlice));
 end;
 
 constructor TGrid.Create(const Template: TGrid);
@@ -7495,7 +7724,7 @@ end;
 
 function TGrid.GetSlice(const Coordinate: TPoint): TSlice;
 begin
-  Result:= FData[Coordinate.Index(FSizeY)];
+  Result:= FData[Coordinate.Index(FSizeX)];
 end;
 
 function TGrid.IsValid: boolean;
@@ -7531,7 +7760,7 @@ end;
 
 procedure TGrid.SetSlice(const Coordinate: TPoint; const Value: TSlice);
 begin;
-  FData[Coordinate.Index(FSizeY)]:= Value;
+  FData[Coordinate.Index(FSizeX)]:= Value;
 end;
 
 procedure TGrid.SetSlice(x, y: integer; const Value: TSlice);
@@ -7580,6 +7809,7 @@ var
 label
   Done;
 begin
+  Assert((Bounds.Left = 0) and (Bounds.Top = 0));
   repeat
     ChangeCount:= 0;
     for y:= Bounds.Top to Bounds.Bottom do begin
@@ -7602,6 +7832,28 @@ begin
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
+
+function TGrid.GridSolveOldSingleSweep(const Bounds: TRect): TSliverChanges;
+var
+  ChangeCount: integer;
+label
+  Done;
+begin
+  Assert((Bounds.Left = 0) and (Bounds.Top = 0));
+  repeat
+    ChangeCount:= 0;
+    for var y:= Bounds.Top to Bounds.Bottom do begin
+      for var x:= Bounds.Left to Bounds.Right do begin
+        Result:= SliverSolveOld(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+      end; { for y }
+    end; { for x }
+  until (ChangeCount = 0);
+Done:
+  Self.FIsValid:= Result.IsValid;
+end;
+
 
 procedure TForm2.GridSolveLockstep(const Old, New: TGrid);
 var
@@ -7856,7 +8108,7 @@ begin
   GetMinSlice(MinSlice, MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
-    DisplayUniqueSolution(Form2.StringGrid2);
+    //DisplayUniqueSolution(Form2.StringGrid2);
     Exit(TSliverChanges.Changed);
   end;
   //FActive.Activate(GetSliceIndex(MinSlice));
@@ -7886,6 +8138,14 @@ begin
     //We have now reduced our grid to only those states that are valid upon first inspection.
     //All alternatives investigated are invalid, there is no solution, return UNSAT.
   Result:= TSliverChanges.Invalid;
+end;
+
+function TGrid.Validate: boolean;
+var
+  SpilRect: TRect;
+begin
+  var CurrentBitmap:= Self.AsBitmap(0,0,SpilRect);
+  Result:= CurrentBitmap.Validate(FutureBitmap);
 end;
 
 function TGrid.GetUniqueSolutionOld(var ValidSolutions: TArray<TGrid>; var ValidCount: integer): TSliverChanges;
@@ -7927,6 +8187,44 @@ begin
   else Result:= TSliverChanges.Changed;
 end;
 
+function TGrid.GetUniqueSolutionOldSingleSweep: TSliverChanges;
+const
+  HasUniqueSolution = 513;
+var
+  MinCount: integer;
+  MinSlice: PSlice;
+begin
+  GetMinSlice(MinSlice, MinCount);
+  //If we cannot find a count other than 1, then we have reached a unique solution.
+  if (MinCount = HasUniqueSolution) then begin
+    //DisplayUniqueSolution(Form2.StringGrid2);
+    Exit(TSliverChanges.Changed);
+  end;
+  //FActive.Activate(GetSliceIndex(MinSlice));
+  //Explore each of the alternatives recursively
+  var Clone:= Self.Clone;
+  var Index:= -1;
+  for var i:= 0 to MinCount -1 do begin
+    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
+    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+    //var MinSliceIndex:= GetSliceIndex(MinSlice);
+
+    //solve the grid
+    //starting at the pivot (this saves about 10%).
+    var Changes:= Self.GridSolveOldSingleSweep(Self.BoundingRect); //if we're lucky then there is no solution
+    if Changes.IsValid then begin
+      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+      Result:= GetUniqueSolutionOldSingleSweep; //Depth first search for a solution.
+      if Result.IsValid then Exit;   //Early out when we have a unique solution
+    end;
+    //No single solution? then reset the grid and try the next constellation
+    if (i < (MinCount-1)) then Clone.Overwrite(Self)
+  end; {for i}
+    //We have now reduced our grid to only those states that are valid upon first inspection.
+    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+  Result:= TSliverChanges.Invalid;
+end;
+
 function TGrid.GetUniqueSolutionOld: TSliverChanges;
 const
   HasUniqueSolution = 513;
@@ -7937,7 +8235,9 @@ begin
   GetMinSlice(MinSlice, MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
-    Exit(TSliverChanges.Changed);
+    //Test to see if this solution is indeed valid
+    if Self.Validate then Exit(TSliverChanges.Changed)
+    else Exit(TSliverChanges.Invalid);
   end;
   //FActive.Activate(GetSliceIndex(MinSlice));
   //Explore each of the alternatives recursively
@@ -8198,7 +8498,7 @@ var
   begin
     input:= input and Mask[Result.x, Result.y]; //Remove the out of bounds pixels
     //The X shift can never shift the input across a 64 bit boundary
-    if (P.X > 0) then Input:= Input shl P.X else Input:= Input shr -P.X;
+    if (P.X >= 0) then Input:= Input shl P.X else Input:= Input shr -P.X;
     if (P.Y >= 0) then begin
       Part1:= input shl ((P.Y mod 4) * 16);
       if ((P.Y mod 4) in [0,1]) then Part2:= 0
@@ -8212,6 +8512,7 @@ var
 
 begin
   Result:= P;
+  //Set the spillage
   if (P.X in [0..13]) then Result.X:= 0
   else if (P.X > 13) then Result.X:= P.X - 13;
   if (P.Y in [0..13]) then Result.Y:= 0
@@ -8219,24 +8520,39 @@ begin
   //Let's process the known fragment first and then do the same for the unknown fragment
   Split(Part1, Part2, KnownFragment);
   case P.Y of
-    -2..1,4,5,8,9: FKnownData[(P.Y + 2) mod 4]:= FKnownData[(P.Y + 2) mod 4] or Part1;
+    -2..1,4,5,8,9: FKnownData[(P.Y + 2) div 4]:= FKnownData[(P.Y + 2) div 4] or Part1;
     2..3,6..7,10..11: begin
-      FKnownData[P.Y mod 4]:= FKnownData[P.Y mod 4] or Part1;
-      FKnownData[(P.Y mod 4)+1]:= FKnownData[(P.Y mod 4)+1] or Part2;
+      FKnownData[P.Y div 4]:= FKnownData[P.Y div 4] or Part1;
+      FKnownData[(P.Y div 4)+1]:= FKnownData[(P.Y div 4)+1] or Part2;
     end;
     12,13,14,15: FKnownData[3]:= FKnownData[3] or Part1;
   end; {case}
 
+  if (UnknownFragment = 0) then Exit;
   Split(Part1, Part2, UnknownFragment);
   {TODO -oJB -cTGridBitmap.PasteFragment : Fix duplication of case statement}
   case P.Y of
-    -2..1,4,5,8,9: FUnknownData[(P.Y + 2) mod 4]:= FUnknownData[(P.Y + 2) mod 4] or Part1;
+    -2..1,4,5,8,9: FUnknownData[(P.Y + 2) div 4]:= FUnknownData[(P.Y + 2) div 4] or Part1;
     2..3,6..7,10..11: begin
-      FUnknownData[P.Y mod 4]:= FUnknownData[P.Y mod 4] or Part1;
-      FUnknownData[(P.Y mod 4)+1]:= FUnknownData[(P.Y mod 4)+1] or Part2;
+      FUnknownData[P.Y div 4]:= FUnknownData[P.Y div 4] or Part1;
+      FUnknownData[(P.Y div 4)+1]:= FUnknownData[(P.Y div 4)+1] or Part2;
     end;
     12,13,14,15: FUnknownData[3]:= FUnknownData[3] or Part1;
   end; {case}
+end;
+
+procedure TGridBitmap.SetKnownPixel(x, y: integer; state: boolean);
+const
+  UnitHeight = 8;
+begin
+  FKnownUnit[y div UnitHeight].SetPixel(x,y mod UnitHeight,state);
+end;
+
+procedure TGridBitmap.SetUnknownPixel(x, y: integer; state: boolean = true);
+const
+  UnitHeight = 8;
+begin
+  FUnknownUnit[y div UnitHeight].SetPixel(x,y mod UnitHeight, state);
 end;
 
 function TGridBitmap.TestUnknownFuture: boolean;
@@ -8312,10 +8628,10 @@ begin
   //First calculate the t=1 pattern from the t=0 current KnownData
   //A cellblock is a 64x64 pixel
   var Block:= TCellBlock.Create(0,0,nil);
-  Block.p[5+0].q[0]:= Self.FKnownData[0];
-  Block.p[5+0].q[1]:= Self.FKnownData[1];
-  Block.p[5+4].q[0]:= Self.FKnownData[2];
-  Block.p[5+4].q[1]:= Self.FKnownData[3];
+  Block.p[5+0].Data8[0]:= Self.FKnownData[0];
+  Block.p[5+0].Data8[1]:= Self.FKnownData[1];
+  Block.p[5+4].Data8[0]:= Self.FKnownData[2];
+  Block.p[5+4].Data8[1]:= Self.FKnownData[3];
   Block.ToDoList.Activate(5);
   Block.ToDoList.Activate(5+4);
   Block.GeneratePtoQ;
@@ -8632,6 +8948,12 @@ end;
 constructor TSliceDict.Create;
 begin
   inherited Create;
+  Init;
+end;
+
+procedure TSliceDict.Init;
+begin
+  FIndex:= 0;
   FSliceDictionaryComparer:= TSliceDictionaryComparer.Create;
   Self.NSDictionary:= TSliceDictionary.Create(FSliceDictionaryComparer);
   Self.EWDictionary:= TSliceDictionary.Create(FSliceDictionaryComparer);
@@ -8639,6 +8961,8 @@ begin
   Self.NoDupsDict:= TDictionary<integer, integer>.Create(FNoDupsComparer);
   SetLength(SliceDB, 1024); //Reserve 1024* 1 million entries. (64 GB) max.
   SetLength(SliceDB[0], LineSize); //Allocate the first line.
+  SetLength(PopCountDB, 1024); //Reserve 1024* 1 million entries. (64 GB) max.
+  SetLength(PopcountDB[0], LineSize);
   for var i := 0 to 511 do begin
     var Slice:= TSlice.FullyEmpty;
     Slice.ForceSingleBit(i);
@@ -8649,12 +8973,16 @@ begin
   InsertSlice(TSlice.FullyUnknown);
   InsertSlice(TSlice.FullyEmpty);
   Assert(FIndex = (Invalid+1));
+  FNSLookups:= 0;
+  FEWLookups:= 0;
+  FSliceQueries:= 0;
 end;
 
 procedure TSliceDict.EW(var East, West: integer; out Changes: TSliverChanges);
 begin
   var EW:= TPair<integer, integer>.Create(East,West);
   var Result: TSliceResult;
+  Inc(FEWLookups);
   if EWDictionary.TryGetValue(EW, Result) then begin
     Changes:= Result.Changes;
     East:= Result.NE;
@@ -8679,6 +9007,7 @@ procedure TSliceDict.NS(var North, South: integer; out Changes: TSliverChanges);
 begin
   var NS:= TPair<integer, integer>.Create(North, South);
   var Result: TSliceResult;
+  Inc(FNSLookups);
   if NSDictionary.TryGetValue(NS, Result) then begin
     Changes:= Result.Changes;
     North:= Result.NE;
@@ -8699,11 +9028,28 @@ begin
   end;
 end;
 
+procedure TSliceDict.Clean;
+begin
+  NSDictionary.Free;
+  EWDictionary.Free;
+  NoDupsDict.Free;
+  SetLength(Self.SliceDB,0);
+  Init;
+end;
+
 function TSliceDict.GetItem(index: integer): PSlice;
 begin
   var Y:= Index mod LineSize;
   var X:= Index div LineSize;
   Result:= @SliceDB[x][y];
+  Inc(FSliceQueries);
+end;
+
+function TSliceDict.GetPopcount(index: integer): integer;
+begin
+  var Y:= Index mod LineSize;
+  var X:= Index div LineSize;
+  Result:= PopcountDB[x][y];
 end;
 
 function TSliceDict.InsertSlice(const Slice: TSlice): integer;
@@ -8712,11 +9058,13 @@ begin
   var X:= FIndex div LineSize;
   if (Y = 0) then begin //Grow the DB
     SetLength(SliceDB[X], LineSize); //Allocate a new line.
+    SetLength(PopcountDB[X], LineSize); //Allocate a new line.
   end;
   SliceDB[X][Y]:= Slice;
   //Only commit the slice to the DB if it is unique.
   if NoDupsDict.TryAdd(FIndex, FIndex) then begin
     Result:= FIndex;
+    PopcountDB[X][Y]:= Slice.Popcount;
     Inc(FIndex);
   end else begin
     //The Slice already exists, return its index
@@ -8744,7 +9092,8 @@ end;
 
 procedure TDictGrid.Clear;
 begin
-  for var i:= 0 to FSizeX*FSizeY-1 do begin
+  var Count:= FSizeX * FSizeY;
+  for var i:= 0 to Count-1 do begin
     FData[i]:= TSliceDict.Invalid;
   end;
 end;
@@ -8757,13 +9106,14 @@ end;
 
 constructor TDictGrid.Create(SizeX, SizeY: integer);
 begin
-  if GlobalDict = nil then GlobalDict:= TSliceDict.Create;
+  if (GlobalDict = nil) then GlobalDict:= TSliceDict.Create;
   FDict:= GlobalDict;
   FIsValid:= true;
   FSizeX:= SizeX;
   FSizeY:= SizeY;
-  SetLength(FData, FSizeX*FSizeY);
-  for var i:= 0 to FSizeX * FSizeY-1 do begin
+  var Count:= (FSizeX * FSizeY);
+  SetLength(FData, Count);
+  for var i:= 0 to Count-1 do begin
     FData[i]:= TSliceDict.Unknown;
   end;
   //FDebugGrid:= TGrid.Create(SizeX, SizeY);
@@ -8782,7 +9132,7 @@ end;
 
 procedure TDictGrid.SetItems(x, y: integer; const Value: integer);
 begin
-  var i:= x+y*FSizeX;
+  var i:= (y * FSizeX) + x;
   FData[i]:= Value;
   //FDebugGrid.FData[i]:= Self.FDict.SliceDB[0][Value];
 end;
@@ -8968,14 +9318,13 @@ Done:
   Self.FIsValid:= Result.IsValid;
 end;
 
-
-
 function TDictGrid.GetMinSlice(out MinCount: integer): integer;
 begin
   MinCount:= 513; //Make sure we always get a hit.
   Result:= -1;
   for var i:= 0 to FSizeX * FSizeY-1 do begin
-    var iCount:= Self.Slices[i].PopCount;
+    //var iCount:= Self.Slices[i].PopCount;
+    var iCount:= Self.Popcount[i];
     if (iCount < MinCount) and (iCount > 1) then begin
       MinCount:= iCount;
       Result:= i;
@@ -8987,6 +9336,11 @@ end;
 function TDictGrid.GetSlices(index: integer): PSlice;
 begin
   Result:= Self.FDict.Item[FData[index]];
+end;
+
+function TDictGrid.GetPopcount(index: integer): integer;
+begin
+  Result:= Self.FDict.Popcount[FData[index]];
 end;
 
 function TDictGrid.GetSlicesXY(x, y: integer): PSlice;

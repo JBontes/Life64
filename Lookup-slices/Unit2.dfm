@@ -22,7 +22,7 @@ object Form2: TForm2
     Top = 0
     Width = 1514
     Height = 729
-    ActivePage = TabSheet1
+    ActivePage = TabSheet6
     Align = alClient
     Style = tsFlatButtons
     TabOrder = 0
@@ -30,21 +30,21 @@ object Form2: TForm2
       Caption = 'TabSheet1'
       object Label1: TLabel
         Left = 178
-        Top = 20
+        Top = 3
         Width = 31
         Height = 13
         Caption = 'Label1'
       end
       object Label2: TLabel
         Left = 178
-        Top = 39
+        Top = 22
         Width = 31
         Height = 13
         Caption = 'Label2'
       end
       object Label3: TLabel
         Left = 178
-        Top = 58
+        Top = 41
         Width = 31
         Height = 13
         Caption = 'Label3'
@@ -103,6 +103,13 @@ object Form2: TForm2
         Height = 13
         Caption = 'Alive'
       end
+      object Label_dict_size: TLabel
+        Left = 8
+        Top = 224
+        Width = 72
+        Height = 13
+        Caption = 'Label_dict_size'
+      end
       object BtnProcessSliceLookup: TButton
         Left = 3
         Top = 34
@@ -114,9 +121,9 @@ object Form2: TForm2
       end
       object Memo1: TMemo
         Left = 6
-        Top = 200
+        Top = 256
         Width = 169
-        Height = 460
+        Height = 404
         Lines.Strings = (
           'Memo1')
         TabOrder = 1
@@ -566,6 +573,33 @@ object Form2: TForm2
         Caption = 'Dictionary Solve && Time'
         TabOrder = 25
         OnClick = BtnDictSolveAndTimeClick
+      end
+      object BtnOld_SolveAndTimeSingleSweep: TButton
+        Left = 3
+        Top = 188
+        Width = 169
+        Height = 25
+        Caption = 'Single sweep direction'
+        TabOrder = 26
+        OnClick = BtnOld_SolveAndTimeSingleSweepClick
+      end
+      object Button2: TButton
+        Left = 178
+        Top = 60
+        Width = 64
+        Height = 52
+        Caption = 'Clear DB'
+        TabOrder = 27
+        OnClick = Button2Click
+      end
+      object BtnSaveLoad: TButton
+        Left = 179
+        Top = 118
+        Width = 63
+        Height = 33
+        Caption = 'Save/Load'
+        TabOrder = 28
+        OnClick = BtnSaveLoadClick
       end
     end
     object TabSheet2: TTabSheet
