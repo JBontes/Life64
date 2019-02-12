@@ -104,8 +104,8 @@ object Form2: TForm2
         Caption = 'Alive'
       end
       object Label_dict_size: TLabel
-        Left = 8
-        Top = 224
+        Left = 800
+        Top = 157
         Width = 72
         Height = 13
         Caption = 'Label_dict_size'
@@ -120,9 +120,9 @@ object Form2: TForm2
         OnClick = BtnProcessSliceLookupClick
       end
       object Memo1: TMemo
-        Left = 6
+        Left = 0
         Top = 256
-        Width = 169
+        Width = 187
         Height = 404
         Lines.Strings = (
           'Memo1')
@@ -138,7 +138,7 @@ object Form2: TForm2
         OnClick = BtnProcess_7x7_CountLookupClick
       end
       object StringGrid1: TStringGrid
-        Left = 181
+        Left = 186
         Top = 157
         Width = 503
         Height = 503
@@ -529,14 +529,14 @@ object Form2: TForm2
         TabOrder = 20
         OnClick = BtnInitWithGoE2Click
       end
-      object Button1: TButton
+      object BtnSolveTrackChanges: TButton
         Left = 3
         Top = 126
         Width = 170
         Height = 25
-        Caption = 'SolveAndTime'
+        Caption = 'SolveAndTime_Track'
         TabOrder = 21
-        OnClick = Button1Click
+        OnClick = BtnSolveTrackChangesClick
       end
       object BtnOld_SolveAndTime: TButton
         Left = 3
@@ -600,6 +600,24 @@ object Form2: TForm2
         Caption = 'Save/Load'
         TabOrder = 28
         OnClick = BtnSaveLoadClick
+      end
+      object BtnClearMemo: TButton
+        Left = 0
+        Top = 670
+        Width = 173
+        Height = 25
+        Caption = 'Clear memo'
+        TabOrder = 29
+        OnClick = BtnClearMemoClick
+      end
+      object BtnSolveOldNoRepeat: TButton
+        Left = 3
+        Top = 219
+        Width = 169
+        Height = 25
+        Caption = 'No repeat'
+        TabOrder = 30
+        OnClick = BtnSolveOldNoRepeatClick
       end
     end
     object TabSheet2: TTabSheet
@@ -927,7 +945,7 @@ object Form2: TForm2
       Caption = 'Search'
       ImageIndex = 5
       object BtnSearchGoE: TButton
-        Left = 104
+        Left = 56
         Top = 24
         Width = 225
         Height = 25
@@ -937,9 +955,9 @@ object Form2: TForm2
       end
       object MemoGoE_solution: TMemo
         Left = 56
-        Top = 80
+        Top = 136
         Width = 377
-        Height = 513
+        Height = 457
         Lines.Strings = (
           'MemoGoE_solution')
         TabOrder = 1
@@ -952,6 +970,23 @@ object Form2: TForm2
         Caption = 'Make 5x5->3x3 lookup'
         TabOrder = 2
         OnClick = Btn5x5To3x3_LookupClick
+      end
+      object ProgressBar2: TProgressBar
+        Left = 56
+        Top = 72
+        Width = 377
+        Height = 33
+        Step = 1
+        TabOrder = 3
+      end
+      object BtnSearchSize: TButton
+        Left = 287
+        Top = 24
+        Width = 185
+        Height = 25
+        Caption = 'Search Sizes'
+        TabOrder = 4
+        OnClick = BtnSearchSizeClick
       end
     end
   end

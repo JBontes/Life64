@@ -401,10 +401,9 @@ const
 
 class procedure TSliceTests.TSlice_NextSetBit;
 var
-  NextA, NextB: integer;
   S: TSlice;
   i,j: integer;
-  a,b: integer;
+  b: integer;
   previousSet: integer;
 begin
   for i:= 0 to (TimingRepetitions div 100) do begin
@@ -501,7 +500,7 @@ class procedure TSliceTests.TimeMoveFast;
 var
   i: integer;
 begin
-  for i:= 0 to TimingRepetitions div 1000 do Unit2.Move(Data1,Data2, SizeOf(Data1) div 100);
+  for i:= 0 to TimingRepetitions div 1000 do Unit2.Move8(Data1,Data2, SizeOf(Data1) div 100);
 end;
 
 class procedure TSliceTests.TimeMoveSlow;
@@ -551,7 +550,7 @@ end;
 class procedure TSliceTests.Time_TSliceAnd;
 var
   A,B,C: TSlice;
-  i,j: integer;
+  i: integer;
 begin
   A:= TSlice.Random;
   B:= TSlice.Random;
@@ -564,7 +563,7 @@ end;
 class procedure TSliceTests.Time_TSliceOr;
 var
   A,B,C: TSlice;
-  i,j: integer;
+  i: integer;
 begin
   A:= TSlice.Random;
   B:= TSlice.Random;
@@ -624,7 +623,7 @@ end;
 
 class procedure TSliceTests.TSlice_Equal;
 var
-  A,B,C,D: TSlice;
+  A,B: TSlice;
   i,j: integer;
   pc: integer;
 begin
@@ -647,7 +646,7 @@ end;
 class procedure TSliceTests.TSlice_GetBit;
 var
   A,B: TSlice;
-  i,j: integer;
+  i: integer;
   pc: integer;
   R: integer;
   Bit: UInt64;
@@ -696,12 +695,10 @@ class procedure TSliceTests.TSlice_LogicalNot;
 var
   A,B: TSlice;
   i,j: integer;
-  Test: Uint64;
 begin
   for i:= 0 to TimingRepetitions do begin
     A:= TSlice.Random;
     B:= not(A);
-    Test:= 0;
     for j:= 0 to 7 do begin
       if (B.Data8[j] <> not(A.Data8[j])) then begin
         B:= A;
@@ -739,7 +736,7 @@ end;
 class procedure TSliceTests.TSlice_SetBit;
 var
   A,B: TSlice;
-  i,j: integer;
+  i: integer;
   pc: integer;
   R: integer;
   Bit: UInt64;
@@ -772,7 +769,7 @@ var
   A: TSliver;
   i: integer;
 begin
-  //for i:= 0 to TimingRepetitions do A.East;
+  for i:= 0 to TimingRepetitions do A.East;
   Assert.IsTrue(true);
 end;
 

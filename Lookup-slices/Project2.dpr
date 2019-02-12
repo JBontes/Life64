@@ -1,6 +1,7 @@
 program Project2;
 
 uses
+  FastMM4,
   TestInsight.Client,
   TestInsight.DUnitx,
   Vcl.Forms,

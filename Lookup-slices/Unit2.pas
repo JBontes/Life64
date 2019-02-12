@@ -729,9 +729,15 @@ type
     constructor Create(Parent: PActiveSlice);
   end;
 
+
   TActiveSlice = packed record
   private type
-    TActive = set of byte;
+    TActive = record
+    private
+      Data: UInt64; //Placeholder.
+    public
+      class operator in(Index: integer; const Self: TActiveSlice.TActive): boolean;
+    end;
   public type
     TActiveEnumerator = record
     private
@@ -760,16 +766,16 @@ type
     procedure Activate(index: integer);
     procedure Reset(index: integer);
     procedure Update(index: integer; NewStatus: boolean);
-    constructor Create(MaxX, MaxY: integer); overload;
-    constructor Create(MinX, MinY, MaxX, MaxY, SizeX: integer); overload;
+    procedure Init(MaxX, MaxY: integer); overload;
+    procedure Init(MinX, MinY, MaxX, MaxY, SizeX: integer); overload;
     procedure Limit(const Bounds: TRect);
   private
     case boolean of
       true: (
-        FActive: TActive;
         FCount: integer;
         FSizeX: integer;
-        ActiveCount: integer
+        ActiveCount: integer;
+        FActive: TActive;
       );
 //    false: (
 //        FBits: array[0..3] of UInt64
@@ -801,6 +807,12 @@ type
   end;
 
   TSliceDict = class
+  public
+    var const
+      ZeroSlice = 512;
+      OneSlice = ZeroSlice + 1;
+      UnknownSlice = ZeroSlice + 2;
+      InvalidSlice = ZeroSlice + 3;
   private
     const LineSize = 1024*1024;
   private
@@ -838,6 +850,9 @@ type
     ///  Return the new East and West Indexes and report back on the changes.
     /// </summary>
     procedure EW(var East, West: integer; out Changes: TSliverChanges);
+    /// <summary>
+    ///  Clean out all data and start out with a virgin database.
+    /// </summary>
     procedure Clean;
   public
     function GetItem(index: integer): PSlice;
@@ -878,7 +893,7 @@ type
     /// <summary>
     ///  array[FSizeX,FSizeY] of TSlice (remember, by design slices overlap)
     /// </summary>
-    FActive: TActiveSlice;
+    FActive: PActiveSlice;
     FSizeX, FSizeY: integer;
     /// <summary>
     ///  Is the grid free of invalid slices?
@@ -952,6 +967,11 @@ type
     function GridSolveOldSingleSweep(const Bounds: TRect): TSliverChanges;
     function GetUniqueSolutionOldSingleSweep: TSliverChanges;
     function Validate: boolean;
+    function GridSolveOldNoRepeat(const Bounds: TRect): TSliverChanges; overload;
+    function GridSolveOldNoRepeat(const Bounds: TRect; IndexStart: integer): TSliverChanges; overload;
+    function SliverSolveOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function SliverSolveReverseOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
+    function GetUniqueSolutionOldNoRepeat: TSliverChanges; overload;
   public type
     /// <summary>
     ///  After the basic overlapping of gridwalker has run out of steam
@@ -1103,7 +1123,9 @@ type
     FDict: TSliceDict;
     FIsValid: boolean;
     FFutureBitmap: TGridBitmap;
-    //FDebugGrid: TGrid;
+    {$IFDEF DoubleCheck}
+    FDebugGrid: TGrid;
+    {$ENDIF}
     function GetSlices(index: integer): PSlice; inline;
     function GetPopCount(index: integer): integer; inline;
     function GridSolveOld(const Bounds: TRect; IndexStart: integer = -1): TSliverChanges;
@@ -1118,6 +1140,9 @@ type
     constructor Create(SizeX, SizeY: integer); overload;
     constructor Create(const Template: TDictGrid); overload;
     procedure Overwrite(var GridToBeOverwritten: TDictGrid);
+    {$IFDEF DoubleCheck}
+    function Mismatch(const Grid: TGrid): boolean;
+    {$ENDIF}
     procedure Clear;
     function Clone: TDictGrid;
     function SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
@@ -1266,7 +1291,7 @@ type
     ProgressBar1: TProgressBar;
     BtnCreateLookup5x5to3x3UsingSpeculativeExploration: TButton;
     BtnInitWithGoE2: TButton;
-    Button1: TButton;
+    BtnSolveTrackChanges: TButton;
     BtnValidateCompressedLookupTable: TButton;
     BtnOld_SolveAndTime: TButton;
     TabSheet6: TTabSheet;
@@ -1280,6 +1305,10 @@ type
     Label_dict_size: TLabel;
     Button2: TButton;
     BtnSaveLoad: TButton;
+    BtnClearMemo: TButton;
+    BtnSolveOldNoRepeat: TButton;
+    ProgressBar2: TProgressBar;
+    BtnSearchSize: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1326,7 +1355,7 @@ type
     procedure StringGrid5DblClick(Sender: TObject);
     procedure BtnInitWithGoE2Click(Sender: TObject);
     procedure BtnRunSingleTestClick(Sender: TObject);
-    procedure Button1Click(Sender: TObject);
+    procedure BtnSolveTrackChangesClick(Sender: TObject);
     procedure BtnValidateCompressedLookupTableClick(Sender: TObject);
     procedure BtnOld_SolveAndTimeClick(Sender: TObject);
     procedure BtnSearchGoEClick(Sender: TObject);
@@ -1337,6 +1366,10 @@ type
     procedure BtnOld_SolveAndTimeSingleSweepClick(Sender: TObject);
     procedure Button2Click(Sender: TObject);
     procedure BtnSaveLoadClick(Sender: TObject);
+    procedure Memo1DblClick(Sender: TObject);
+    procedure BtnClearMemoClick(Sender: TObject);
+    procedure BtnSolveOldNoRepeatClick(Sender: TObject);
+    procedure BtnSearchSizeClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -1367,6 +1400,7 @@ type
     CountsTable: TArray<Int64>;
     CountsIndex: TArray<integer>;
     GoESolutions: TStringList;
+    //MaxMemoryUsed: UInt64;
     function FoldRemaining(Offset: TOffset; UnknownMask, KnownMask: integer; Filter: boolean = false): TSlice;
   end;
 
@@ -1390,7 +1424,7 @@ const
 function PopCount(Input: int64): integer;
 function Random64: Uint64;
 function GetCurrentProcessorNumber: DWORD; stdcall;
-procedure Move(const source; var Dest; Size: NativeInt);
+procedure Move8(const source; var Dest; Size: NativeInt);
 
    //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\lib\x86_64-win64\AVXGenerate.o'}
    //{$L 'C:\Users\Johan\Documents\Embarcadero\Studio\Projects\Life64\Lazarus\AVX_Lib.dll'}
@@ -1409,6 +1443,7 @@ implementation
 {//$DEFINE GpProfile}
 
 uses{$IFDEF GpProfile U} GpProf, {$ENDIF GpProfile U}
+  FastMM4,
   StrUtils,
   System.Types,
   Generics.Collections,
@@ -1609,7 +1644,6 @@ end;
 {$ENDIF}
 {$IFDEF CPUX64}
 asm
-{ TSliceDict }
 .NOFRAME
     // ECX = STR
     // EDX = len
@@ -1684,7 +1718,20 @@ end;
 {$ENDIF}
 {$ENDREGION}
 
-procedure Move(const source; var Dest; Size: NativeInt);
+//function GetMemoryUsed: UInt64;
+//var
+//  st: TMemoryManagerState;
+//  sb: TSmallBlockTypeState;
+//begin
+//  GetMemoryManagerState(st);
+//  result :=  st.TotalAllocatedMediumBlockSize +
+//            + st.TotalAllocatedLargeBlockSize;
+//  for sb in st.SmallBlockTypeStates do begin
+//    result := result + sb.UseableBlockSize * sb.AllocatedBlockCount;
+//  end;
+//end;
+
+procedure Move8(const source; var Dest; Size: NativeInt);
 //RCX = @source
 //RDX = @dest
 //r8 = size
@@ -1699,6 +1746,32 @@ asm
   mov rsi,r10
   mov rdi,r9
 end;
+
+procedure Move4(const source; var Dest; Size: NativeInt);
+asm
+  mov r9,rdi         //save regs
+  mov r10,rsi        //save regs
+  mov rsi,rcx        //source
+  mov rdi,rdx        //dest
+  mov rcx,r8         //size
+  shr rcx,2          //divide by 4
+  rep movsd
+  mov rsi,r10
+  mov rdi,r9
+end;
+
+procedure Move1(const source; var Dest; Size: NativeInt);
+asm
+  mov r9,rdi         //save regs
+  mov r10,rsi        //save regs
+  mov rsi,rcx        //source
+  mov rdi,rdx        //dest
+  mov rcx,r8         //size
+  rep movsb
+  mov rsi,r10
+  mov rdi,r9
+end;
+
 
 function RorX(Shift: integer; const input: Uint64): Uint64;
 asm
@@ -2493,6 +2566,7 @@ begin
     ResultNS:= DoNS;
     if not(CenterChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
   end; {else while}
+  Result:= (ResultNS or ResultEW);
 end;
 
 // Solve the given sliver with its neighbors to the East and South
@@ -2583,6 +2657,7 @@ begin
     ResultNS:= DoNS;
     if not(CenterChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
   end;
+  Result:= (ResultNS or ResultEW);
 end;
 
 // Solve the given sliver with its neighbors to the East and South
@@ -2619,18 +2694,56 @@ begin
   var ResultEW:= DoEW;
   if ResultEW.IsInvalid then Exit(ResultEW);
   var ResultNS:= DoNS;
-  Exit(ResultNS or ResultEW);
-//  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-//  //The center keeps changing, loop until it stabilizes
-//  while True do begin
-//    //Looping until changes stabilize makes a small difference +/- 5% savings.
-//    ResultEW:= DoEW;
-//    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
-//    //We hardly ever reach this point
-//    ResultNS:= DoNS;
-//    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-//  end;
+  //Exit(ResultNS or ResultEW);
+  if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.WestChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.NorthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
 end;
+
+// Solve the given sliver with its neighbors to the East and South
+// Returns the status of any changes
+function TGrid.SliverSolveOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  Sliver: TSliver;
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if (x < MinMax.Right) then begin
+      var IndexEast:= IndexCenter+1;
+      //If there is a problem the sliver will be invalid.
+      Sliver:= TSliver.EW(Self[IndexEast], Self[IndexCenter], Result);
+      if Result.WestChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.West;
+      if Result.EastChanged then Self[IndexEast]:= Self[IndexEast] and Sliver.East;
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if (y < MinMax.Bottom) then begin
+      var IndexSouth:= IndexCenter + FSizeX;
+      Sliver:= TSliver.NS(Self[IndexCenter], Self[IndexSouth], Result);
+      if Result.SouthChanged then Self[IndexSouth]:= Self[IndexSouth] and Sliver.South;
+      if Result.NorthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.North;
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
+  Exit(ResultEW or ResultNS);
+end;
+
 
 // Solve the given sliver with its neighbors to the East and South
 // Returns the status of any changes
@@ -2666,17 +2779,54 @@ begin
   var ResultEW:= DoEW;
   if ResultEW.IsInvalid then Exit(ResultEW);
   var ResultNS:= DoNS;
+  //Exit(ResultNS or ResultEW);
+  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  //The center keeps changing, loop until it stabilizes
+  while True do begin
+    //Looping until changes stabilize makes a small difference +/- 5% savings.
+    ResultEW:= DoEW;
+    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
+    //We hardly ever reach this point
+    ResultNS:= DoNS;
+    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
+  end;
+end;
+
+// Solve the given sliver with its neighbors to the East and South
+// Returns the status of any changes
+function TGrid.SliverSolveReverseOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
+var
+  Sliver: TSliver;
+  IndexCenter: integer;
+
+  function DoEW: TSliverChanges;
+  begin
+    if x > (MinMax.Left) then begin
+      var IndexWest:= IndexCenter-1;
+      //If there is a problem the sliver will be invalid.
+      Sliver:= TSliver.EW(Self[IndexCenter], Self[IndexWest], Result);
+      if Result.WestChanged then Self[IndexWest]:= Self[IndexWest] and Sliver.West;
+      if Result.EastChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.East;
+    end else Result:= TSliverChanges.UnChanged; { handle EW }
+  end;
+
+  function DoNS: TSliverChanges;
+  begin
+    if y > (MinMax.Top) then begin
+      var IndexNorth:= IndexCenter - FSizeX;
+      Sliver:= TSliver.NS(Self[IndexNorth], Self[IndexCenter], Result);
+      if Result.SouthChanged then Self[IndexCenter]:= Self[IndexCenter] and Sliver.South;
+      if Result.NorthChanged then Self[IndexNorth]:= Self[IndexNorth] and Sliver.North;
+    end else Result:= TSliverChanges.UnChanged; { handle NS }
+  end;
+
+begin
+  IndexCenter:= (y * FSizeX) + x;
+  //EW
+  var ResultEW:= DoEW;
+  if ResultEW.IsInvalid then Exit(ResultEW);
+  var ResultNS:= DoNS;
   Exit(ResultNS or ResultEW);
-//  if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-//  //The center keeps changing, loop until it stabilizes
-//  while True do begin
-//    //Looping until changes stabilize makes a small difference +/- 5% savings.
-//    ResultEW:= DoEW;
-//    if not(ResultEW.EastChanged) or ResultEW.IsInvalid then Exit(ResultEW or ResultNS);
-//    //We hardly ever reach this point
-//    ResultNS:= DoNS;
-//    if not(ResultNS.SouthChanged) or ResultNS.IsInvalid then Exit(ResultNS or ResultEW);
-//  end;
 end;
 
 
@@ -4438,6 +4588,11 @@ begin
   FS.Free;
 end;
 
+procedure TForm2.Memo1DblClick(Sender: TObject);
+begin
+
+end;
+
 /// <summary>
 ///  Create a grid from the bitmap on-screen
 ///  And apply the lookup table to all slices in that grid.
@@ -4484,6 +4639,11 @@ begin
       StringGrid1.Cells[x, y]:= '';
     end; { for x }
   end; { for y }
+end;
+
+procedure TForm2.BtnClearMemoClick(Sender: TObject);
+begin
+  Memo1.Lines.Clear;
 end;
 
 //Check to see which processor cores are enabled for this process.
@@ -4715,11 +4875,10 @@ begin
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOld;//(ValidSolutions, ValidCount);
   //Label1.Caption:= ValidCount.ToString;
   Timer.Stop;
-  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
-  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  if Timer.ElapsedMilliseconds > 0 then begin
-    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  end;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+//  if Timer.ElapsedMilliseconds > 0 then begin
+//    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+//  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4761,11 +4920,10 @@ begin
   Timer.Stop;
   //Label1.Caption:= ValidCount.ToString;
 
-  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
-  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  if Timer.ElapsedMilliseconds > 0 then begin
-    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  end;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+//  if Timer.ElapsedMilliseconds > 0 then begin
+//    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+//  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
   Label_dict_size.Caption:= 'SliceDB: '+GlobalDict.Findex.ToString+' NS Dict: '+GlobalDict.NSDictionary.Count.ToString+' EW Dict: '+GlobalDict.EWDictionary.Count.ToString+' NS lookups: '+GlobalDict.NSLookups.ToString + ' EW Lookups: '+GlobalDict.EWLookups.ToString+ ' SliceQueries: '+GlobalDict.SliceQueries.ToString;
@@ -4783,7 +4941,7 @@ end;
 // 543     147
 // 876     258
 
-procedure TForm2.Button1Click(Sender: TObject);
+procedure TForm2.BtnSolveTrackChangesClick(Sender: TObject);
 begin
   // Read the lookup table
   // if not FileOpenDialog1.Execute then Exit;
@@ -4810,13 +4968,15 @@ begin
   MySlices.FActive.Limit(MySlices.BoundingRect);
   var Status:= MySlices.GridSolve(MySlices.BoundingRect);
   //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  //var OldMemoryUsed:= GetMemoryUsed;
+  //MaxMemoryUsed:= 0;
   if Status.IsValid then Status:= MySlices.GetUniqueSolution;
+  //Memo1.Lines.Add('Memory used: '+((MaxMemoryUsed - OldMemoryUsed) div 1024).ToString+' KiB');
   Timer.Stop;
-  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
-  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  if Timer.ElapsedMilliseconds > 0 then begin
-    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  end;
+  Memo1.Lines.Add(Format('%.2f',[Timer.ElapsedTicks / 3900000])+' ms until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+//  if Timer.ElapsedMilliseconds > 0 then begin
+//    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+//  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -4846,6 +5006,7 @@ begin
     end;
     FileDialog.Title:= Caption;
     if not(FileDialog.Execute) then exit;
+
     if DoLoad then begin
       SL.LoadFromFile(FileDialog.Filename, TEncoding.ASCII);
       if SL.Count = 0 then exit;
@@ -4926,11 +5087,10 @@ begin
   if Status.IsValid then Status:= MySlices.GetUniqueSolutionOldSingleSweep;//(ValidSolutions, ValidCount);
   //Label1.Caption:= ValidCount.ToString;
   Timer.Stop;
-  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution');
-  Memo1.Lines.Add(Timer.ElapsedMilliseconds.ToString+' ms until solution');
-  if Timer.ElapsedMilliseconds > 0 then begin
-    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
-  end;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+//  if Timer.ElapsedMilliseconds > 0 then begin
+//    Memo1.Lines.add((Timer.ElapsedTicks / Timer.ElapsedMilliseconds).ToString+ ' ticks per ms');
+//  end;
   if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
   else Memo1.Lines.Add('SAT - Pattern has a solution');
 end;
@@ -5044,29 +5204,76 @@ begin
   Result:= (input and $119DFF) xor Result;
 end;
 
-procedure TForm2.BtnSearchGoEClick(Sender: TObject);
+procedure TForm2.BtnSearchSizeClick(Sender: TObject);
 const
-  SearchCount = 50;
+  SearchCount = 4;//50;//171;   //50*50*50 = 125000
 var
   Stats: TStringGrid;
+  List: TArray<string>;
+  Cumulative: Uint64;
+  OldTimer: UInt64;
+const
+  C: array[false..true] of string = ('0','1');
+label Done;
 begin
+  ProgressBar2.Position:= 0;
   Stats:= TStringGrid.Create(nil);
   var CSV:= TStringList.Create;
-  try
-  Stats.ColCount:= 12;
-  Stats.RowCount:= SearchCount * SearchCount * SearchCount {* SearchCount};
+  Stats.ColCount:= 17;
+  Stats.RowCount:= (SearchCount * SearchCount * SearchCount)+1; {* SearchCount};
+//  try
+//    CSV.LoadFromFile('stats_Plain.txt');
+//    for var i:= 1 to Stats.RowCount-1 do begin
+//      List:= CSV[i-1].Split([',']);
+//      for var k:= 0 to High(List) do begin
+//        Stats.Cells[k,i]:= Stringreplace(List[k], '"', '', [rfReplaceAll]);
+//      end;
+//    end;
+//    CSV.Clear;
+//  except {ignore}
+//  end;
+
+  var Row:= 0;
+  Stats.Cells[0,Row]:=  'time';
+  Stats.Cells[1,Row]:=  'cum time';
+  Stats.Cells[2,Row]:=  'orphan';
+
+  Stats.Cells[3,Row]:=  't time';
+  Stats.Cells[4,Row]:=  't cum';
+
+  Stats.Cells[5,Row]:=  'slice q';
+  Stats.Cells[6,Row]:=  'slice_e';
+  Stats.Cells[7,Row]:=  'inter q';
+  Stats.Cells[8,Row]:=  'inter e';
+  Stats.Cells[9,Row]:=  'db time';
+  Stats.Cells[10,Row]:= 'db cum';
+
+  Stats.Cells[11,Row]:= 'l time';
+  Stats.Cells[12,Row]:= 'l cum';
+  Stats.Cells[13,Row]:= 'l slice q';
+  Stats.Cells[14,Row]:= 'l slice e';
+  Stats.Cells[15,Row]:= 'l inter q';
+  Stats.Cells[16,Row]:= 'l inter e';
+
+  var ZeroSlice:= LookupTable[oCenter, 0];
+  var OneSlice:= not(ZeroSlice);
+//  var ZeroSlice:= TSliceDict.Zero;  //LookupTable[0,oCenter];
+//  var OneSlice:= TSliceDict.One;//not(ZeroSlice);
 
   Assert(Flip45($1FFFFFF) = $1FFFFFF);
   Assert(Flip45Part($119DFF) = $1FFFFFF);
   EnableAllCPUCores;
-  BtnSearchGoE.Enabled:= false;
+  BtnSearchSize.Enabled:= false;
   var OldSliceDB:= 0;
   var OldSliceQueries:= 0;
   var OldNSDict:= 0;
   var OldNSQueries:= 0;
   var OldEWDict:= 0;
   var OldEWQueries:= 0;
+  var GoEGrid:= TStringGrid.Create(nil);
 
+
+  try
 
   if Length(CountsTable) = 0 then begin
     if not(FileOpenDialog1.Execute) then exit;
@@ -5089,17 +5296,223 @@ begin
     ));
   end;
   //Parallel.Async(procedure begin
-    var ZeroSlice:= TSliceDict.Zero;  //LookupTable[0,oCenter];
-    var OneSlice:= TSliceDict.One;//not(ZeroSlice);
-    var Row:= 0;
+    var FoundGoE:= false;
+
+    for var GridSize:= 4 to 4 do begin
+
+      Row:= 1;
+      //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+      begin
+        Cumulative:= 0;
+        var Grid:= TGrid.Create(10*GridSize, 10* GridSize); //TDictGrid.Create;
+        GoEGrid.RowCount:= 10 * GridSize; GoEGrid.ColCount:= 10*GridSize;
+        var Timer:= THiResStopWatch.StartPaused;
+        OldTimer:= 0;
+        for var NW:= 0 to SearchCount-1 do begin
+        for var SW:= 0 to SearchCount-1 do begin
+          //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+          //for var SE:= 0 to SearchCount-1 do begin
+            for var NE:= 0 to SearchCount-1 do begin
+
+              FoundGoE:= false;
+              var iNW:= CountsIndex[NW];
+              var iSE:= Flip45(iNW);
+              var iSW:= Flip45Part(CountsIndex[SW]);
+              var iNE:= Flip45Part(CountsIndex[NE]);
+
+              //Now get the pixels from the i's
+              for var x1:= 0 to GridSize-1 do begin
+                for var y1:= 0 to GridSize-1 do begin
+
+                  for var y:= 0 to 4 do begin
+                    for var x:= 4 downto 0 do begin
+                      var Mask:= (1 shl (4-x)) shl (y * 5);
+                      var S: TSlice;
+                      if ((Mask and iNW) <> 0) then S:= OneSlice else S:= ZeroSlice;
+                      Grid[x+x1*10,y+y1*10]:= S;
+                      GoEGrid.Cells[x+x1*10,y+y1*10]:= C[S = OneSlice];
+                      if ((Mask and iNE) <> 0) then S:= OneSlice else S:= ZeroSlice;
+                      Grid[x+5+x1*10,y+y1*10]:= S;
+                      GoEGrid.Cells[x+5+x1*10,y+y1*10]:= C[S = OneSlice];
+                      if ((Mask and iSW) <> 0) then S:= OneSlice else S:= ZeroSlice;
+                      Grid[x+x1*10,y+5+y1*10]:= S;
+                      GoEGrid.Cells[x+x1*10,y+5+y1*10]:= C[S = OneSlice];
+                      if ((Mask and iSE) <> 0) then S:= OneSlice else S:= ZeroSlice;
+                      Grid[x+5+x1*10,y+5+y1*10]:= S;
+                      GoEGrid.Cells[x+5+x1*10,y+5+y1*10]:= C[S = OneSlice];
+                    end; {for x}
+                  end; {for y}
+                end; {for y1}
+              end; {for x1}
+              OldTimer:= Timer.Unpause;
+              //The grid is set, let's solve it.
+              if Grid.GridSolve{Old}(Grid.BoundingRect).IsInvalid then begin
+                //We have found a GoE.
+                FoundGoE:= true;
+              end else begin
+                //Not yet, keep looking
+                if Grid.GetUniqueSolution{Old}.IsInvalid then begin
+                  //We have found a GoE
+                  FoundGoE:= true;
+                end;
+              end;
+              //Add statistics to the list.
+              Timer.Pause;
+              if (GridSize > 1) then begin
+                var GoeFile:= TStringList.Create;
+                try
+                  for var i:= 0 to GoeGrid.RowCount-1 do begin
+                    GoEFile.Add(GoEGrid.Rows[i].CommaText);
+                  end; {for i}
+                  var Prefix:= 'non';
+                  if FoundGoE then Prefix:= '';
+                  GoeFile.SaveToFile(Prefix+'GoE'+(GridSize*10).ToString+'x'+(GridSize*10).ToString+'_'+Row.ToString+'.txt');
+                finally
+                  GoEFile.Free;
+                end;
+              end; {if GridSize}
+              var Time:= (Timer.GetElapsedTicks - OldTimer);
+              var Col:= (GridSize-1)*3+1;
+              Stats.Cells[Col,Row]:= Time.ToString;
+              Inc(Cumulative, Time);
+              Stats.Cells[0,Row]:= Row.ToString;
+              Stats.Cells[Col+1,Row]:= Cumulative.ToString;
+              Stats.Cells[Col+2,Row]:= Integer(FoundGoE).ToString;
+
+
+//              if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+//                ProgressBar2.Position:= ProgressBar2.Position + 1;
+//                Application.ProcessMessages;
+//                ProgressBar2.Repaint;
+//                Application.ProcessMessages;
+//              end;
+              Inc(Row);
+              if Row = 21 then goto Done;
+
+            end; {for NE}//end); {parallel.for}
+          //end; {for SE}
+          end; {for SW}
+        end; {for NW}//); {for parallel NW}
+      end; {local block}
+      //******************************************************************************************?
+    end; {for GridSize}
+Done:
+    BtnSearchSize.Enabled:= true;
+  //end); //TTask.run
+  for var i := 0 to Stats.RowCount-1 do begin
+    CSV.Add(Stats.Rows[i].CommaText)
+  end; {for i}
+  CSV.SaveToFile('stats_40x40.txt');
+  finally
+    CSV.Free;
+    Stats.Free;
+  end;
+end;
+
+procedure TForm2.BtnSearchGoEClick(Sender: TObject);
+const
+  SearchCount = 171;//50;//171;   //50*50*50 = 125000
+var
+  Stats: TStringGrid;
+  List: TArray<string>;
+  Cumulative: Uint64;
+  OldTimer: UInt64;
+begin
+  ProgressBar2.Position:= 0;
+  Stats:= TStringGrid.Create(nil);
+  var CSV:= TStringList.Create;
+  Stats.ColCount:= 17;
+  Stats.RowCount:= (SearchCount * SearchCount * SearchCount)+1; {* SearchCount};
+//  try
+//    CSV.LoadFromFile('stats_Plain.txt');
+//    for var i:= 1 to Stats.RowCount-1 do begin
+//      List:= CSV[i-1].Split([',']);
+//      for var k:= 0 to High(List) do begin
+//        Stats.Cells[k,i]:= Stringreplace(List[k], '"', '', [rfReplaceAll]);
+//      end;
+//    end;
+//    CSV.Clear;
+//  except {ignore}
+//  end;
+
+  var Row:= 0;
+  Stats.Cells[0,Row]:=  'time';
+  Stats.Cells[1,Row]:=  'cum time';
+  Stats.Cells[2,Row]:=  'orphan';
+
+  Stats.Cells[3,Row]:=  't time';
+  Stats.Cells[4,Row]:=  't cum';
+
+  Stats.Cells[5,Row]:=  'slice q';
+  Stats.Cells[6,Row]:=  'slice_e';
+  Stats.Cells[7,Row]:=  'inter q';
+  Stats.Cells[8,Row]:=  'inter e';
+  Stats.Cells[9,Row]:=  'db time';
+  Stats.Cells[10,Row]:= 'db cum';
+
+  Stats.Cells[11,Row]:= 'l time';
+  Stats.Cells[12,Row]:= 'l cum';
+  Stats.Cells[13,Row]:= 'l slice q';
+  Stats.Cells[14,Row]:= 'l slice e';
+  Stats.Cells[15,Row]:= 'l inter q';
+  Stats.Cells[16,Row]:= 'l inter e';
+
+  var ZeroSlice:= LookupTable[oCenter, 0];
+  var OneSlice:= not(ZeroSlice);
+//  var ZeroSlice:= TSliceDict.Zero;  //LookupTable[0,oCenter];
+//  var OneSlice:= TSliceDict.One;//not(ZeroSlice);
+
+  Assert(Flip45($1FFFFFF) = $1FFFFFF);
+  Assert(Flip45Part($119DFF) = $1FFFFFF);
+  EnableAllCPUCores;
+  BtnSearchGoE.Enabled:= false;
+  var OldSliceDB:= 0;
+  var OldSliceQueries:= 0;
+  var OldNSDict:= 0;
+  var OldNSQueries:= 0;
+  var OldEWDict:= 0;
+  var OldEWQueries:= 0;
+
+
+  try
+
+  if Length(CountsTable) = 0 then begin
+    if not(FileOpenDialog1.Execute) then exit;
+    var FS:= TFileStream.Create(FileOpenDialog1.Filename, fmOpenRead);
+    Assert(FS.Size mod SizeOf(Int64) = 0);
+    Assert(FS.Size = (1 shl 25)*SizeOf(int64));
+    SetLength(CountsTable, 1 shl 25);
+    FS.Read64(TBytes(CountsTable),0,FS.Size);
+    SetLength(CountsIndex, 1 shl 25);
+    for var i:= 0 to (1 shl 25)-1 do begin
+      CountsIndex[i]:= i;
+    end;
+    TArray.Sort<integer>(CountsIndex, TDelegatedComparer<integer>.Construct(
+      function(const Left, Right: integer): integer
+      begin
+        if CountsTable[Left] > CountsTable[Right] then Exit(1);
+        if CountsTable[Left] < CountsTable[Right] then Exit(-1);
+        Result:= 0;
+      end
+    ));
+  end;
+  //Parallel.Async(procedure begin
+    var FoundGoE:= false;
+
+    Row:= 1;
     //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
-      var Grid:= TDictGrid.Create(10,10);
+    begin
+      Cumulative:= 0;
+      var Grid:= TGrid.Create(10,10); //TDictGrid.Create;
+      var Timer:= THiResStopWatch.StartPaused;
+      OldTimer:= 0;
       for var NW:= 0 to SearchCount-1 do begin
       for var SW:= 0 to SearchCount-1 do begin
-        TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+        //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
         //for var SE:= 0 to SearchCount-1 do begin
           for var NE:= 0 to SearchCount-1 do begin
 
+            FoundGoE:= false;
             var iNW:= CountsIndex[NW];
             var iSE:= Flip45(iNW);
             var iSW:= Flip45Part(CountsIndex[SW]);
@@ -5115,54 +5528,347 @@ begin
                 if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= OneSlice else Grid[x+5,y+5]:= ZeroSlice;
               end; {for x}
             end; {for y}
+            OldTimer:= Timer.Unpause;
+            //The grid is set, let's solve it.
+            if Grid.GridSolve{Old}(Grid.BoundingRect).IsInvalid then begin
+              //We have found a GoE.
+              FoundGoE:= true;
+              //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+            end else begin
+              //Not yet, keep looking
+              if Grid.GetUniqueSolution{Old}.IsInvalid then begin
+                //We have found a GoE
+                FoundGoE:= true;
+                //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
+              end;
+            end;
+            //Add statistics to the list.
+            Timer.Pause;
+//            Stats.Cells[0,Row]:= (Timer.GetElapsedTicks - OldTimer).ToString;
+//            Stats.Cells[1,Row]:= Timer.GetElapsedTicks.ToString;
+//            Stats.Cells[2,Row]:= Integer(FoundGoE).ToString;
+            var Time:= (Timer.GetElapsedTicks - OldTimer);
+            Stats.Cells[3,Row]:= Time.ToString;
+            Inc(Cumulative, Time);
+            Stats.Cells[4,Row]:= Cumulative.ToString;
+//            Stats.Cells[5,Row]:= '0';
+//
+//            //Cumulative
+//            Stats.Cells[6,Row]:= '0';
+//            Stats.Cells[7,Row]:= '';
+//            Stats.Cells[8,Row]:= '';
+//            Stats.Cells[9,Row]:= '';
+//            Stats.Cells[10,Row]:= '';
+//            Stats.Cells[11,Row]:= '';
+
+            if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+              ProgressBar2.Position:= ProgressBar2.Position + 1;
+              Application.ProcessMessages;
+              ProgressBar2.Repaint;
+              Application.ProcessMessages;
+            end;
+
+
+//            //Individual counts
+//            Stats.Cells[0,Row]:= (Grid.FDict.FIndex - OldSliceDB).ToString;
+//            Stats.Cells[1,Row]:= (Grid.FDict.FSliceQueries - OldSliceQueries).ToString;
+//            Stats.Cells[2,Row]:= (Grid.FDict.NSDictionary.Count - OldNSDict).ToString;
+//            Stats.Cells[3,Row]:= (Grid.FDict.FNSLookups - OldNSQueries).ToString;
+//            Stats.Cells[4,Row]:= (Grid.FDict.EWDictionary.Count - OldEWDict).ToString;
+//            Stats.Cells[5,Row]:= (Grid.FDict.FEWLookups - OldEWQueries).ToString;
+//
+//            //Cumulative
+//            Stats.Cells[6,Row]:= (Grid.FDict.FIndex).ToString;
+//            Stats.Cells[7,Row]:= (Grid.FDict.FSliceQueries).ToString;
+//            Stats.Cells[8,Row]:= (Grid.FDict.NSDictionary.Count).ToString;
+//            Stats.Cells[9,Row]:= (Grid.FDict.FNSLookups).ToString;
+//            Stats.Cells[10,Row]:= (Grid.FDict.EWDictionary.Count).ToString;
+//            Stats.Cells[11,Row]:= (Grid.FDict.FEWLookups).ToString;
+//
+//            OldSliceDB:= Grid.FDict.FIndex;
+//            OldSliceQueries:= Grid.FDict.FSliceQueries;
+//            OldNSDict:= Grid.FDict.NSDictionary.Count;
+//            OldNSQueries:= Grid.FDict.FNSLookups;
+//            OldEWDict:= Grid.FDict.EWDictionary.Count;
+//            OldEWQueries:= Grid.FDict.FEWLookups;
+
+            Inc(Row);
+          end; {for NE}//end); {parallel.for}
+        //end; {for SE}
+        end; {for SW}
+      end; {for NW}//); {for parallel NW}
+    end; {local block}
+    //******************************************************************************************?
+    FoundGoE:= false;
+    Row:= 1;
+    //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+    begin
+      var Grid:= TGrid.Create(10,10); //TDictGrid.Create;
+      var Timer:= THiResStopWatch.StartPaused;
+      ProgressBar2.Position:= ProgressBar2.Min;
+      OldTimer:= 0;
+      Cumulative:= 0;
+      for var NW:= 0 to SearchCount-1 do begin
+      for var SW:= 0 to SearchCount-1 do begin
+        //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+        //for var SE:= 0 to SearchCount-1 do begin
+          for var NE:= 0 to SearchCount-1 do begin
+
+            FoundGoE:= false;
+            var iNW:= CountsIndex[NW];
+            var iSE:= Flip45(iNW);
+            var iSW:= Flip45Part(CountsIndex[SW]);
+            var iNE:= Flip45Part(CountsIndex[NE]);
+
+            //Now get the pixels from the i's
+            for var y:= 0 to 4 do begin
+              for var x:= 4 downto 0 do begin
+                var Mask:= (1 shl (4-x)) shl (y * 5);
+                if ((Mask and iNW) <> 0) then Grid[x,y]:= OneSlice else Grid[x,y]:= ZeroSlice;
+                if ((Mask and iNE) <> 0) then Grid[x+5,y]:= OneSlice else Grid[x+5,y]:= ZeroSlice;
+                if ((Mask and iSW) <> 0) then Grid[x,y+5]:= OneSlice else Grid[x,y+5]:= ZeroSlice;
+                if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= OneSlice else Grid[x+5,y+5]:= ZeroSlice;
+              end; {for x}
+            end; {for y}
+            OldTimer:= Timer.Unpause;
             //The grid is set, let's solve it.
             if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then begin
               //We have found a GoE.
+              FoundGoE:= true;
               //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
             end else begin
               //Not yet, keep looking
               if Grid.GetUniqueSolutionOld.IsInvalid then begin
                 //We have found a GoE
+                FoundGoE:= true;
                 //TThread.Synchronize(nil, procedure begin ReportSolution(NW, NE, SW, SE); end);
               end;
             end;
             //Add statistics to the list.
-
-            //Individual counts
-            Stats.Cells[0,Row]:= (Grid.FDict.FIndex - OldSliceDB).ToString;
-            Stats.Cells[1,Row]:= (Grid.FDict.FSliceQueries - OldSliceQueries).ToString;
-            Stats.Cells[2,Row]:= (Grid.FDict.NSDictionary.Count - OldNSDict).ToString;
-            Stats.Cells[3,Row]:= (Grid.FDict.FNSLookups - OldNSQueries).ToString;
-            Stats.Cells[4,Row]:= (Grid.FDict.EWDictionary.Count - OldEWDict).ToString;
-            Stats.Cells[5,Row]:= (Grid.FDict.FEWLookups - OldEWQueries).ToString;
-
-            //Cumulative
-            Stats.Cells[6,Row]:= (Grid.FDict.FIndex).ToString;
-            Stats.Cells[7,Row]:= (Grid.FDict.FSliceQueries).ToString;
-            Stats.Cells[8,Row]:= (Grid.FDict.NSDictionary.Count).ToString;
-            Stats.Cells[9,Row]:= (Grid.FDict.FNSLookups).ToString;
-            Stats.Cells[10,Row]:= (Grid.FDict.EWDictionary.Count).ToString;
-            Stats.Cells[11,Row]:= (Grid.FDict.FEWLookups).ToString;
-
-            OldSliceDB:= Grid.FDict.FIndex;
-            OldSliceQueries:= Grid.FDict.FSliceQueries;
-            OldNSDict:= Grid.FDict.NSDictionary.Count;
-            OldNSQueries:= Grid.FDict.FNSLookups;
-            OldEWDict:= Grid.FDict.EWDictionary.Count;
-            OldEWQueries:= Grid.FDict.FEWLookups;
-
+            Timer.Pause;
+            var Time:= (Timer.GetElapsedTicks - OldTimer);
+            Inc(Cumulative, Time);
+            Stats.Cells[0,Row]:= Time.ToString;
+            Stats.Cells[1,Row]:= Cumulative.ToString;
+            Stats.Cells[2,Row]:= Integer(FoundGoE).ToString;
+            if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+              ProgressBar2.Position:= ProgressBar2.Position + 1;
+              Application.ProcessMessages;
+              ProgressBar2.Repaint;
+              Application.ProcessMessages;
+            end;
             Inc(Row);
           end; {for NE}//end); {parallel.for}
         //end; {for SE}
-      end; {for SW}
-    end; {for NW}//); {for parallel NW}
+        end; {for SW}
+      end; {for NW}//); {for parallel NW}
+    end; {local block}
     //TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
+    //******************************************************************************************?
+//    FoundGoE:= false;
+//    Row:= 1;
+//    //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+//    begin
+//      var Grid:= TDictGrid.Create(10,10);
+//      var Timer:= THiResStopWatch.StartPaused;
+//      ProgressBar2.Position:= ProgressBar2.Min;
+//      var OldTimer:= 0;
+//      var CumulativeWorst: UINT64:= 0;
+//      var CumulativeBest: UINT64:= 0;
+//      for var NW:= 0 to SearchCount-1 do begin
+//      for var SW:= 0 to SearchCount-1 do begin
+//        //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+//        //for var SE:= 0 to SearchCount-1 do begin
+//          for var NE:= 0 to SearchCount-1 do begin
+//
+//            FoundGoE:= false;
+//            var iNW:= CountsIndex[NW];
+//            var iSE:= Flip45(iNW);
+//            var iSW:= Flip45Part(CountsIndex[SW]);
+//            var iNE:= Flip45Part(CountsIndex[NE]);
+//
+//            //Now get the pixels from the i's
+//            for var y:= 0 to 4 do begin
+//              for var x:= 4 downto 0 do begin
+//                var Mask:= (1 shl (4-x)) shl (y * 5);
+//                if ((Mask and iNW) <> 0) then Grid[x,y]:= TSliceDict.OneSlice else Grid[x,y]:= TSliceDict.ZeroSlice;
+//                if ((Mask and iNE) <> 0) then Grid[x+5,y]:= TSliceDict.OneSlice else Grid[x+5,y]:= TSliceDict.ZeroSlice;
+//                if ((Mask and iSW) <> 0) then Grid[x,y+5]:= TSliceDict.OneSlice else Grid[x,y+5]:= TSliceDict.ZeroSlice;
+//                if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= TSliceDict.OneSlice else Grid[x+5,y+5]:= TSliceDict.ZeroSlice;
+//              end; {for x}
+//            end; {for y}
+//            var Clone:= Grid.Clone; //Keep a clone for the repeat.
+//            GlobalDict.Clean; //Start time whilst creating the database
+//            Timer.Unpause;
+//            //Worst case timing
+//            if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then FoundGoE:= true
+//            else begin
+//              if Grid.GetUniqueSolutionOld.IsInvalid then FoundGoE:= true;
+//            end;
+//            //Add statistics to the list.
+//            Timer.Pause;
+//            var Time:= (Timer.GetElapsedTicks - OldTimer);
+//            Inc(CumulativeWorst, Time);
+//            Stats.Cells[5,Row]:= Time.ToString;
+//            Stats.Cells[6,Row]:= CumulativeWorst.ToString;
+//            OldTimer:= Timer.GetElapsedTicks;
+//            //Do the repeat
+//            Clone.Overwrite(Grid);  //Put the grid back to the start.
+//            Timer.Unpause;
+//            //Best case timing
+//            if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then FoundGoE:= true
+//            else begin
+//              if Grid.GetUniqueSolutionOld.IsInvalid then FoundGoE:= true;
+//            end;
+//            Timer.Pause;
+//            Time:= (Timer.GetElapsedTicks - OldTimer);
+//            Inc(CumulativeBest, Time);
+//            Stats.Cells[7,Row]:= Time.ToString;
+//            Stats.Cells[8,Row]:= CumulativeBest.ToString;
+//            OldTimer:= Timer.GetElapsedTicks;
+//            if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+//              ProgressBar2.Position:= ProgressBar2.Position + 1;
+//              Application.ProcessMessages;
+//              ProgressBar2.Repaint;
+//              Application.ProcessMessages;
+//            end;
+//            Inc(Row);
+//          end; {for NE}//end); {parallel.for}
+//        //end; {for SE}
+//        end; {for SW}
+//      end; {for NW}//); {for parallel NW}
+//    end; {local block}
+    //TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
+    //******************************************************************************************?
+    FoundGoE:= false;
+    Row:= 1;
+    //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+    begin
+      var Grid:= TDictGrid.Create(10,10);
+      GlobalDict.Clean;
+      var Timer:= THiResStopWatch.StartPaused;
+      ProgressBar2.Position:= ProgressBar2.Min;
+      OldTimer:= 0;
+      Cumulative:= 0;
+      for var NW:= 0 to SearchCount-1 do begin
+      for var SW:= 0 to SearchCount-1 do begin
+        //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+        //for var SE:= 0 to SearchCount-1 do begin
+          for var NE:= 0 to SearchCount-1 do begin
+
+            FoundGoE:= false;
+            var iNW:= CountsIndex[NW];
+            var iSE:= Flip45(iNW);
+            var iSW:= Flip45Part(CountsIndex[SW]);
+            var iNE:= Flip45Part(CountsIndex[NE]);
+
+            //Now get the pixels from the i's
+            for var y:= 0 to 4 do begin
+              for var x:= 4 downto 0 do begin
+                var Mask:= (1 shl (4-x)) shl (y * 5);
+                if ((Mask and iNW) <> 0) then Grid[x,y]:= TSliceDict.OneSlice else Grid[x,y]:= TSliceDict.ZeroSlice;
+                if ((Mask and iNE) <> 0) then Grid[x+5,y]:= TSliceDict.OneSlice else Grid[x+5,y]:= TSliceDict.ZeroSlice;
+                if ((Mask and iSW) <> 0) then Grid[x,y+5]:= TSliceDict.OneSlice else Grid[x,y+5]:= TSliceDict.ZeroSlice;
+                if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= TSliceDict.OneSlice else Grid[x+5,y+5]:= TSliceDict.ZeroSlice;
+              end; {for x}
+            end; {for y}
+            OldTimer:= Timer.Unpause;
+            //Worst case timing
+            if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then FoundGoE:= true
+            else begin
+              if Grid.GetUniqueSolutionOld.IsInvalid then FoundGoE:= true;
+            end;
+            //Add statistics to the list.
+            Timer.Pause;
+            var Time:= (Timer.GetElapsedTicks - OldTimer);
+            Inc(Cumulative, Time);
+            Stats.Cells[5,Row]:= GlobalDict.FSliceQueries.ToString; //number of queries
+            Stats.Cells[6,Row]:= GlobalDict.FIndex.ToString;        //items in DB
+            Stats.Cells[7,Row]:= (GlobalDict.FNSLookups + GlobalDict.FEWLookups).ToString;
+            Stats.Cells[8,Row]:= (GlobalDict.NSDictionary.Count + GlobalDict.EWDictionary.Count).ToString;
+            Stats.Cells[9,Row]:= Time.ToString;
+            Stats.Cells[10,Row]:= Cumulative.ToString;
+            if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+              ProgressBar2.Position:= ProgressBar2.Position + 1;
+              Application.ProcessMessages;
+              ProgressBar2.Repaint;
+              Application.ProcessMessages;
+            end;
+            Inc(Row);
+          end; {for NE}//end); {parallel.for}
+        //end; {for SE}
+        end; {for SW}
+      end; {for NW}//); {for parallel NW}
+    end; {local block}
+    //TThread.Queue(nil, procedure begin BtnSearchGoE.Enabled:= true end);
+        //******************************************************************************************?
+    FoundGoE:= false;
+    Row:= 1;
+    //Parallel.For(0,100).NoWait.NumTasks(System.CPUCount).Execute(procedure(NW: integer) begin
+    begin
+      var Grid:= TDictGrid.Create(10,10);
+      //GlobalDict.Clean; do not clear the database!
+      var Timer:= THiResStopWatch.StartPaused;
+      ProgressBar2.Position:= ProgressBar2.Min;
+      OldTimer:= 0;
+      Cumulative:= 0;
+      for var NW:= 0 to SearchCount-1 do begin
+      for var SW:= 0 to SearchCount-1 do begin
+        //TThread.Synchronize(nil, procedure begin MemoGoE_solution.Lines[0]:= 'NW,SW:'+NW.ToString+','+SW.ToString end);
+        //for var SE:= 0 to SearchCount-1 do begin
+          for var NE:= 0 to SearchCount-1 do begin
+
+            FoundGoE:= false;
+            var iNW:= CountsIndex[NW];
+            var iSE:= Flip45(iNW);
+            var iSW:= Flip45Part(CountsIndex[SW]);
+            var iNE:= Flip45Part(CountsIndex[NE]);
+
+            //Now get the pixels from the i's
+            for var y:= 0 to 4 do begin
+              for var x:= 4 downto 0 do begin
+                var Mask:= (1 shl (4-x)) shl (y * 5);
+                if ((Mask and iNW) <> 0) then Grid[x,y]:= TSliceDict.OneSlice else Grid[x,y]:= TSliceDict.ZeroSlice;
+                if ((Mask and iNE) <> 0) then Grid[x+5,y]:= TSliceDict.OneSlice else Grid[x+5,y]:= TSliceDict.ZeroSlice;
+                if ((Mask and iSW) <> 0) then Grid[x,y+5]:= TSliceDict.OneSlice else Grid[x,y+5]:= TSliceDict.ZeroSlice;
+                if ((Mask and iSE) <> 0) then Grid[x+5,y+5]:= TSliceDict.OneSlice else Grid[x+5,y+5]:= TSliceDict.ZeroSlice;
+              end; {for x}
+            end; {for y}
+            OldTimer:= Timer.Unpause;
+            //Worst case timing
+            if Grid.GridSolveOld(Grid.BoundingRect).IsInvalid then FoundGoE:= true
+            else begin
+              if Grid.GetUniqueSolutionOld.IsInvalid then FoundGoE:= true;
+            end;
+            //Add statistics to the list.
+            Timer.Pause;
+            var Time:= (Timer.GetElapsedTicks - OldTimer);
+            Inc(Cumulative, Time);
+            Stats.Cells[13,Row]:= GlobalDict.FSliceQueries.ToString; //number of queries
+            Stats.Cells[14,Row]:= GlobalDict.FIndex.ToString;        //items in DB
+            Stats.Cells[15,Row]:= (GlobalDict.FNSLookups + GlobalDict.FEWLookups).ToString;
+            Stats.Cells[16,Row]:= (GlobalDict.NSDictionary.Count + GlobalDict.EWDictionary.Count).ToString;
+            Stats.Cells[11,Row]:= Time.ToString;
+            Stats.Cells[12,Row]:= Cumulative.ToString;
+            if Row mod ((SearchCount*SearchCount*SearchCount) div ((ProgressBar2.Max - ProgressBar2.Min)+1)) = 0 then begin
+              ProgressBar2.Position:= ProgressBar2.Position + 1;
+              Application.ProcessMessages;
+              ProgressBar2.Repaint;
+              Application.ProcessMessages;
+            end;
+            Inc(Row);
+          end; {for NE}//end); {parallel.for}
+        //end; {for SE}
+        end; {for SW}
+      end; {for NW}//); {for parallel NW}
+    end; {local block}
+//*********************************************************************************************************
     BtnSearchGoE.Enabled:= true;
   //end); //TTask.run
   for var i := 0 to Stats.RowCount-1 do begin
     CSV.Add(Stats.Rows[i].CommaText)
   end; {for i}
-  CSV.SaveToFile('stats.txt');
+  CSV.SaveToFile('stats_5000.txt');
   finally
     CSV.Free;
     Stats.Free;
@@ -5175,6 +5881,31 @@ begin
   DoARun(rCounter);
   DisplaySlices(StringGrid2, StringGrid3, MySlices);
 end;
+
+procedure TForm2.BtnSolveOldNoRepeatClick(Sender: TObject);
+begin
+  var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
+  var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
+  // Get the slice data from the grid, by looking it up in the lookup table
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
+      MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
+      FutureGridToBitmap(StringGrid1,x,y,MySlices.FFutureBitmap);
+      StringGrid3.Cells[x-1, y-1]:= '';
+    end;
+  end;
+  //Start the timer
+  var Timer:= THiResStopWatch.StartNew;
+  var Status:= MySlices.GridSolveOldNoRepeat(MySlices.BoundingRect);
+  //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolutionOldNoRepeat;//(ValidSolutions, ValidCount);
+  Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+  if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
+  else Memo1.Lines.Add('SAT - Pattern has a solution');
+end;
+
 
 //display all allowed constellations in a slice.
 procedure TForm2.ShowNewLayout;
@@ -6270,7 +7001,7 @@ begin
   end;
   // Write out the North Slice 8 times
   for i:= 0 to 7 do begin
-    Move(North, Result.Slices[i], SizeOf(TSlice));
+    Move8(North, Result.Slices[i], SizeOf(TSlice));
   end;
   Result:= Result and Temp;
 end;
@@ -6313,8 +7044,8 @@ begin
   end;
   // Finally add pixel 11 by doubling the slice
   // Start with 256 bytes
-  Move(E2, Result.Data8[0], 256);
-  Move(E2, Result.Data8[32], 256);
+  Move8(E2, Result.Data8[0], 256);
+  Move8(E2, Result.Data8[32], 256);
   Result:= Result and W1;
 end;
 
@@ -6817,8 +7548,8 @@ begin
   // Finally add pixel 8
   // Just copy the half-slice twice.
   // Expanding 32 bytes into 64.
-  Move(Temp2, Result, 32);
-  Move(Temp2, (@Result.bytes[32])^, 32);
+  Move8(Temp2, Result, 32);
+  Move8(Temp2, (@Result.bytes[32])^, 32);
 end;
 
 function TSliverHelper.West: TSlice;
@@ -7418,8 +8149,8 @@ begin
   else begin
     Count:= A.Count + B.Count;
     SetLength(Temp, Count);
-    Move(A.FData[0],Temp[0],A.Count);
-    Move(B.FData[0],Temp[A.Count], B.Count);
+    Move1(A.FData[0],Temp[0],A.Count);
+    Move1(B.FData[0],Temp[A.Count], B.Count);
     TArray.Sort<byte>(Temp);
     Result.Length:= Count;
     i:= 1;
@@ -7500,7 +8231,7 @@ end;
 
 class operator TMaskedBits.Implicit(const A: array of byte): TMaskedBits;
 begin
-  move(A[0], Result.FData[0], System.Length(a) * SizeOf(byte));
+  Move1(A[0], Result.FData[0], System.Length(a) * SizeOf(byte));
   Result.FLength:= System.Length(a);
   //Result.FData:= A;
 end;
@@ -7508,7 +8239,7 @@ end;
 class operator TMaskedBits.Implicit(const A: TMaskedBits): TArray<byte>;
 begin
   SetLength(Result, A.Count);
-  move(A.FData[0], Result[0], A.Count * SizeOf(byte));
+  Move1(A.FData[0], Result[0], A.Count * SizeOf(byte));
 end;
 
 { TOffsetHelper }
@@ -7641,11 +8372,12 @@ begin
   Assert((SizeX * SizeY) >= 1);
   FSizeX:= SizeX;
   FSizeY:= SizeY;
-  SetLength(FData, SizeX * SizeY);
-  {TODO -oJB -cTGrid.Create : Remove the zero fill}
-  //FillChar(FData[0], SizeOf(TSlice) * SizeX * SizeY, #0);
-  FActive:= TActiveSlice.Create(SizeX, SizeY);
-
+  var Count:= (SizeX * SizeY);
+  //Reserve data at the end of the array for the changes.
+  var ActiveSize:= SizeOf(TActiveSlice) + ((Count+7) div 8);
+  SetLength(FData, Count + ((ActiveSize div SizeOf(TSlice))+1));
+  FActive:= PActiveSlice(pointer(@FData[Count]));
+  FActive.Init(SizeX, SizeY);
   FIsValid:= true;
 end;
 
@@ -7659,14 +8391,14 @@ begin
   Result:= TGrid.Create(Self);
   var Count:= FSizeX * FSizeY;
   if (Count = 0) then exit;
-  Move(Self.FData[0], Result.FData[0], Count * SizeOf(TSlice));
+  Move8(Self.FData[0], Result.FData[0], Count * SizeOf(TSlice));
   Result.FActive:= Self.FActive;
 end;
 
 procedure TGrid.Overwrite(var GridToBeOverwritten: TGrid);
 begin
   var Count:= FSizeX * FSizeY;
-  Move(Self.FData[0], GridToBeOverwritten.FData[0], Count * SizeOf(TSlice));
+  Move8(Self.FData[0], GridToBeOverwritten.FData[0], Count * SizeOf(TSlice));
   GridToBeOverwritten.FActive:= Self.FActive;
 end;
 
@@ -7784,7 +8516,7 @@ label
   Done;
 begin
   repeat
-    for var Index in FActive do begin
+    for var Index in FActive^ do begin
       var x:= Index mod FSizeX;
       var y:= Index div FSizeX;
       Result:= SliverSolve(x, y, Bounds);
@@ -7832,6 +8564,38 @@ begin
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
+
+function TGrid.GridSolveOldNoRepeat(const Bounds: TRect): TSliverChanges;
+var
+  x, y: integer;
+  ChangeCount: integer;
+label
+  Done;
+begin
+  Assert((Bounds.Left = 0) and (Bounds.Top = 0));
+  repeat
+    ChangeCount:= 0;
+    for y:= Bounds.Top to Bounds.Bottom do begin
+      for x:= Bounds.Left to Bounds.Right do begin
+        Result:= SliverSolveOldNoRepeat(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+      end; { for y }
+    end; { for x }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    for y:= Bounds.Bottom downto Bounds.Top do begin
+      for x:= Bounds.Right downto Bounds.Left do begin
+        Result:= SliverSolveReverseOldNoRepeat(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result
+      end; { for y }
+    end; { for x }
+  until (ChangeCount = 0);
+Done:
+  Self.FIsValid:= Result.IsValid;
+end;
+
 
 function TGrid.GridSolveOldSingleSweep(const Bounds: TRect): TSliverChanges;
 var
@@ -7952,6 +8716,55 @@ Start: //32ms (above) vs 29 ms (here), keep the start here.
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
+
+//Solve the grid starting at the given index.
+function TGrid.GridSolveOldNoRepeat(const Bounds: TRect; IndexStart: integer): TSliverChanges;
+var
+  x, y: integer;
+  ChangeCount: integer;
+label
+  Done,
+  Start;
+begin
+  x:= IndexStart mod FSizeX;
+  y:= IndexStart div FSizeX;
+  ChangeCount:= 0;
+  goto Start;
+  repeat
+    ChangeCount:= 0;
+//    y:= Bounds.Top;
+//    while y <= Bounds.Bottom do begin
+    for y := Bounds.Top to Bounds.Bottom do begin
+      for x:= Bounds.Left to Bounds.Right do begin
+//      x:= Bounds.Left;
+//      while x <= Bounds.Right do begin
+//Start: - this is slower than the other position
+        Result:= SliverSolveOldNoRepeat(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
+        //inc(x);
+      end; { while x }
+      //inc(y);
+    end; { while y }
+    if (ChangeCount = 0) then goto Done;
+    ChangeCount:= 0;
+    y:= Bounds.Bottom;
+    while y >= Bounds.Top do begin
+      x:= Bounds.Right;
+      while x >= Bounds.Left do begin
+Start: //32ms (above) vs 29 ms (here), keep the start here.
+        Result:= SliverSolveReverseOldNoRepeat(x, y, Bounds);
+        if (Result.IsInvalid) then goto Done;
+        ChangeCount:= ChangeCount + Result;
+        Dec(x);
+      end; { while x }
+      Dec(y);
+    end; { while y }
+  until (ChangeCount = 0);
+Done:
+  Self.FIsValid:= Result.IsValid;
+end;
+
 
 function TGrid.BitmapsNeeded: integer;
 begin
@@ -8095,7 +8908,6 @@ begin
       end; { for y }
     end; {for x1}
   end; {for y1}
-
 end;
 
 function TGrid.GetUniqueSolution: TSliverChanges;
@@ -8105,6 +8917,9 @@ var
   MinCount: integer;
   MinSlice: PSlice;
 begin
+  //var MemUsed:= GetMemoryUsed;
+  //if MemUsed > Form2.MaxMemoryUsed then Form2.MaxMemoryUsed:= MemUsed;
+
   GetMinSlice(MinSlice, MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
@@ -8187,6 +9002,8 @@ begin
   else Result:= TSliverChanges.Changed;
 end;
 
+
+
 function TGrid.GetUniqueSolutionOldSingleSweep: TSliverChanges;
 const
   HasUniqueSolution = 513;
@@ -8236,8 +9053,9 @@ begin
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     //Test to see if this solution is indeed valid
-    if Self.Validate then Exit(TSliverChanges.Changed)
-    else Exit(TSliverChanges.Invalid);
+    //if Self.Validate then Exit(TSliverChanges.Changed)
+    //else Exit(TSliverChanges.Invalid);
+    Exit(TSliverChanges.Changed);
   end;
   //FActive.Activate(GetSliceIndex(MinSlice));
   //Explore each of the alternatives recursively
@@ -8261,6 +9079,45 @@ begin
     //All alternatives investigated are invalid, there is no solution, return UNSAT.
   Result:= TSliverChanges.Invalid
 end;
+
+function TGrid.GetUniqueSolutionOldNoRepeat: TSliverChanges;
+const
+  HasUniqueSolution = 513;
+var
+  MinCount: integer;
+  MinSlice: PSlice;
+begin
+  GetMinSlice(MinSlice, MinCount);
+  //If we cannot find a count other than 1, then we have reached a unique solution.
+  if (MinCount = HasUniqueSolution) then begin
+    //Test to see if this solution is indeed valid
+    //if Self.Validate then Exit(TSliverChanges.Changed)
+    //else Exit(TSliverChanges.Invalid);
+    Exit(TSliverChanges.Changed);
+  end;
+  //FActive.Activate(GetSliceIndex(MinSlice));
+  //Explore each of the alternatives recursively
+  var Clone:= Self.Clone;
+  var Index:= -1;
+  for var i:= 0 to MinCount -1 do begin
+    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
+    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+    //solve the grid
+    //starting at the pivot (this saves about 10%).
+    var Changes:= Self.GridSolveOldNoRepeat(Self.BoundingRect, GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+    if Changes.IsValid then begin
+      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+      Result:= GetUniqueSolutionOldNoRepeat; //Depth first search for a solution.
+      if Result.IsValid then Exit;   //Early out when we have a unique solution
+    end;
+    //No single solution? then reset the grid and try the next constellation
+    if (i < (MinCount-1)) then Clone.Overwrite(Self)
+  end; {for i}
+    //We have now reduced our grid to only those states that are valid upon first inspection.
+    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+  Result:= TSliverChanges.Invalid
+end;
+
 
 
 function TGrid.SpeculativeExploration(Strategy: TExplorationStrategy; const SamplePoint: TPoint): TSliverChanges;
@@ -8717,7 +9574,7 @@ procedure TActiveSlice.Activate(index: integer);
 //rcx = self
 //edx = index
 asm
-  bts [rcx],edx            //if CF=0, then we added a flag
+  bts [rcx + TActiveSlice.FActive],edx            //if CF=0, then we added a flag
   jc @done
   inc dword ptr [rcx.TActiveSlice.ActiveCount]   //increase the active counter
 @done:
@@ -8728,7 +9585,7 @@ procedure TActiveSlice.Reset(index: integer);
 //rcx = self
 //edx = index
 asm
-  btr [rcx],edx            //if CF=1, then we removed a flag
+  btr [rcx + TActiveSlice.FActive],edx            //if CF=1, then we removed a flag
   jnc @done
   dec dword ptr [rcx.TActiveSlice.ActiveCount]   //decrease the active counter
 @done:
@@ -8743,15 +9600,15 @@ asm
   test r8b,r8b
   jnz @Activate
 @Reset:
-  btr [rcx],edx            //if CF=1, then we removed a flag
+  btr [rcx + TActiveSlice.FActive],edx            //if CF=1, then we removed a flag
   jnc @done
   dec dword ptr [rcx.TActiveSlice.ActiveCount]   //decrease the active counter
 @done:
   rep ret
 @Activate:
-  bts [rcx],edx            //if CF=0, then we added a flag
+  bts [rcx + TActiveSlice.FActive],edx            //if CF=0, then we added a flag
   jc @done
-  inc dword ptr [rcx.TActiveSlice.ActiveCount]   //increase the active counter
+  inc dword ptr [rcx + TActiveSlice.ActiveCount]   //increase the active counter
   rep ret
 end;
 
@@ -8760,20 +9617,20 @@ begin
   Result:= TActiveSliceReverseFactory.Create(@Self);
 end;
 
-constructor TActiveSlice.Create(MaxX, MaxY: integer);
+procedure TActiveSlice.Init(MaxX, MaxY: integer);
 begin
   FSizeX:= MaxX;
   FCount:= MaxX * MaxY;
-  FillChar(FActive, SizeOf(FActive), #0);
+  FillChar(FActive, ((FCount + 8-1) div 8), #0);
   for var i := 0 to (MaxX * MaxY)-1 do begin
     Activate(i);
   end;
   ActiveCount:= FCount;
 end;
 
-constructor TActiveSlice.Create(MinX, MinY, MaxX, MaxY, SizeX: integer);
+procedure TActiveSlice.Init(MinX, MinY, MaxX, MaxY, SizeX: integer);
 begin
-  Create(SizeX, MaxY);
+  Init(SizeX, MaxY);
   Limit(Rect(MinX, MinY, MaxX, MaxY));
 end;
 
@@ -8803,7 +9660,7 @@ asm
   mov eax,256           // assume failure
   cmp edx,255           // are we all done?
   jge @done             // yes, done
-  mov r10,rcx           // r10=self, We need cl for shifting
+  lea r10,[rcx.TActiveSlice.FActive]          // r10=self, We need cl for shifting
   inc edx               // we're looking for the next bit
   mov ecx,edx           // shift out the bits already processed
   and ecx,63            // only take 0..63 into account so we don't upset the offset calc
@@ -8843,7 +9700,7 @@ asm
   mov eax,-1            // assume failure
   cmp edx,0             // are we all done?
   jle @done             // yes, done
-  mov r10,rcx           // r10=self, We need cl for shifting
+  lea r10,[rcx.TActiveSlice.FActive]           // r10=self, We need cl for shifting
   mov ecx,edx           // shift out the bits already processed
   neg ecx
   dec edx               // we're looking for the previous bit
@@ -8909,17 +9766,17 @@ begin
   case FMoveForward of
     true: begin
       //var NewIndex:= FIndex;
-      FIndex:= FParent.NextSetBit(FIndex);
-      //Inc(FIndex);
-      //while (FIndex < FParent.FCount) and not(FIndex in Self.FParent.FActive) do Inc(FIndex);
+      //FIndex:= FParent.NextSetBit(FIndex);
+      Inc(FIndex);
+      while (FIndex < FParent.FCount) and not(FIndex in Self.FParent.FActive) do Inc(FIndex);
       //Assert((NewIndex = FIndex) or (FIndex >= FParent.FCount));
     end;
     false: begin
       //var OldIndex:= FIndex;
       //var NewIndex:= FIndex;
-      FIndex:= FParent.PreviousSetBit(FIndex);
-      //Dec(FIndex);
-      //while (FIndex >= 0) and not(FIndex in Self.FParent.FActive) do Dec(FIndex);
+      //FIndex:= FParent.PreviousSetBit(FIndex);
+      Dec(FIndex);
+      while (FIndex >= 0) and not(FIndex in Self.FParent.FActive) do Dec(FIndex);
       //if not((NewIndex = FIndex) or (FIndex < 0)) then begin
       //  NewIndex:= FParent.PreviousSetBit(OldIndex);
       //  Assert((NewIndex = FIndex) or (FIndex < 0));
@@ -9101,7 +9958,7 @@ end;
 function TDictGrid.Clone: TDictGrid;
 begin
   Result:= TDictGrid.Create(Self);
-  Move(FData[0], Result.FData[0], SizeOf(integer) * FSizeX * FSizeY);
+  Move4(FData[0], Result.FData[0], SizeOf(integer) * FSizeX * FSizeY);
 end;
 
 constructor TDictGrid.Create(SizeX, SizeY: integer);
@@ -9116,7 +9973,9 @@ begin
   for var i:= 0 to Count-1 do begin
     FData[i]:= TSliceDict.Unknown;
   end;
-  //FDebugGrid:= TGrid.Create(SizeX, SizeY);
+  {$IFDEF DoubleCheck}
+  FDebugGrid:= TGrid.Create(SizeX, SizeY);
+  {$ENDIF}
 end;
 
 constructor TDictGrid.Create(const Template: TDictGrid);
@@ -9127,14 +9986,19 @@ end;
 procedure TDictGrid.Overwrite(var GridToBeOverwritten: TDictGrid);
 begin
   Assert((GridToBeOverwritten.FSizeX = FSizeX) and (GridToBeOverwritten.FSizeY = FSizeY));
-  Move(FData[0], GridToBeOverwritten.FData[0], SizeOf(integer) * FSizeX * FSizeY);
+  Move4(FData[0], GridToBeOverwritten.FData[0], SizeOf(integer) * FSizeX * FSizeY);
 end;
 
 procedure TDictGrid.SetItems(x, y: integer; const Value: integer);
 begin
   var i:= (y * FSizeX) + x;
   FData[i]:= Value;
-  //FDebugGrid.FData[i]:= Self.FDict.SliceDB[0][Value];
+  {$IFDEF DoubleCheck}
+  FDebugGrid.FData[i]:= Self.FDict.SliceDB[0][Value];
+  if (Self.Slices[i]^ <> FDebugGrid.FData[i]) then begin
+    Assert(false);
+  end;
+  {$ENDIF}
 end;
 
 function TDictGrid.SliverSolveOld(x, y: integer; const MinMax: TRect): TSliverChanges;
@@ -9215,6 +10079,8 @@ begin
   end;
 end;
 
+
+
 function TDictGrid.GetUniqueSolutionOld: TSliverChanges;
 const
   HasUniqueSolution = 513;
@@ -9226,21 +10092,26 @@ begin
   if (MinCount = HasUniqueSolution) then begin
     Exit(TSliverChanges.Changed);
   end;
-  //var DebugMinSlice: PSlice;
-  //var DebugMinCount: integer;
-  //FDebugGrid.GetMinSlice(DebugMinSlice, DebugMinCount);
-  //Assert(DebugMinCount = MinCount);
+  {$IFDEF DoubleCheck}
+  var DebugMinSlice: PSlice;
+  var DebugMinCount: integer;
+  FDebugGrid.GetMinSlice(DebugMinSlice, DebugMinCount);
+  Assert(DebugMinCount = MinCount);
+  var DebugClone:= Self.FDebugGrid.Clone;
+  var DebugIndex:= -1;
+  {$ENDIF}
   //Explore each of the alternatives recursively
   var Clone:= Self.Clone;
-  //var DebugClone:= Self.FDebugGrid.Clone;
   var Index:= -1;
-  //var DebugIndex:= -1;
+
   for var i:= 0 to MinCount -1 do begin
     Index:= Slices[MinSlice].NextSetBit(Index); //Get the next constellation
-    //DebugIndex:= DebugMinSlice.NextSetBit(DebugIndex);
-    //Assert(Index = DebugIndex);
+    {$IFDEF DoubleCheck}
+    DebugIndex:= DebugMinSlice.NextSetBit(DebugIndex);
+    Assert(Index = DebugIndex);
+    DebugMinSlice.ForceSingleBit(DebugIndex);
+    {$ENDIF}
     FData[MinSlice]:= Index; //MinSlice.ForceSingleBit(Index); //Is this constellation valid?
-    //DebugMinSlice.ForceSingleBit(DebugIndex);
     //solve the grid
     //starting at the pivot (this saves about 10%).
     var Changes:= Self.GridSolveOld(BoundingRect, MinSlice); //if we're lucky then there is no solution
@@ -9250,10 +10121,15 @@ begin
       if Result.IsValid then Exit;   //Early out when we have a unique solution
     end;
     //No single solution? then reset the grid and try the next constellation
-    //if (i < (MinCount-1)) then begin
+    if (i < (MinCount-1)) then begin //Skip the restore on the last iteration
       Clone.Overwrite(Self);
-      //DebugClone.Overwrite(Self.FDebugGrid);
-    //end;
+      {$IFDEF DoubleCheck}
+      DebugClone.Overwrite(Self.FDebugGrid);
+      if Self.Mismatch(FdebugGrid) then begin
+        Assert(false);
+      end;
+      {$ENDIF}
+    end;
   end; {for i}
     //We have now reduced our grid to only those states that are valid upon first inspection.
     //All alternatives investigated are invalid, there is no solution, return UNSAT.
@@ -9281,14 +10157,21 @@ begin
 //    while y <= Bounds.Bottom do begin
     for y := Bounds.Top to Bounds.Bottom do begin
       for x:= Bounds.Left to Bounds.Right do begin
+        {$IFDEF DoubleCheck}
+        if (Self.SlicesXY[x,y]^ <> FDebugGrid.Item[point(x,y)]) then begin
+          Assert(false);
+        end;
+        {$ENDIF}
 //      x:= Bounds.Left;
 //      while x <= Bounds.Right do begin
 //Start: - this is slower than the other position
         Result:= SliverSolveOld(x, y, Bounds);
-        //var Result2:= FDebugGrid.SliverSolveOld(x,y,Bounds);
-        //if (Result <> Result2) then begin
-        //  Assert(Result = Result2);
-        //end;
+        {$IFDEF DoubleCheck}
+        var Result2:= FDebugGrid.SliverSolveOld(x,y,Bounds);
+        if (Result <> Result2) or (Self.SlicesXY[x,y]^ <> FDebugGrid.Item[point(x,y)]) then begin
+          Assert(false);
+        end;
+        {$ENDIF}
         if (Result.IsInvalid) then goto Done;
         ChangeCount:= ChangeCount + Result; //+1 if changed, +0 if not changed
         //inc(x);
@@ -9303,10 +10186,12 @@ begin
       while x >= Bounds.Left do begin
 Start: //32ms (above) vs 29 ms (here), keep the start here.
         Result:= SliverSolveReverseOld(x, y, Bounds);
-        //var Result2:= FDebugGrid.SliverSolveReverseOld(x,y,Bounds);
-        //if (Result <> Result2) then begin
-        //  Assert(Result = Result2);
-        //end;
+        {$IFDEF DoubleCheck}
+        var Result2:= FDebugGrid.SliverSolveReverseOld(x,y,Bounds);
+        if (Result <> Result2) or (Self.SlicesXY[x,y]^ <> FDebugGrid.Item[point(x,y)]) then begin
+          Assert(false);
+        end;
+        {$ENDIF}
         if (Result.IsInvalid) then goto Done;
         ChangeCount:= ChangeCount + Result;
         Dec(x);
@@ -9317,6 +10202,17 @@ Start: //32ms (above) vs 29 ms (here), keep the start here.
 Done:
   Self.FIsValid:= Result.IsValid;
 end;
+
+{$IFDEF DoubleCheck}
+function TDictGrid.Mismatch(const Grid: TGrid): boolean;
+begin
+  var Count:= FSizeX * FSizeY;
+  for var i:= 0 to Count-1 do begin
+    if Slices[i]^ <> Grid.FData[i] then Exit(true);
+  end;
+  Result:= false;
+end;
+{$ENDIF}
 
 function TDictGrid.GetMinSlice(out MinCount: integer): integer;
 begin
@@ -9378,6 +10274,18 @@ begin
   Result:= FNV1A_Hash_Meiyan(Value, SizeOf(Value), 4515722);
 end;
 
+
+{ TActiveSlice.TActive }
+
+class operator TActiveSlice.TActive.in(Index: integer; const Self: TActiveSlice.TActive): boolean;
+asm
+  //RDX = self
+  //ecx = index
+  //eax = result
+  xor eax,eax
+  bt [rdx],ecx
+  setc al
+end;
 
 end.
 
