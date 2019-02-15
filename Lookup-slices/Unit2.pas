@@ -53,7 +53,7 @@ type
   /// </summary>
   TSliverChanges = record
   strict private type
-    TSliverState = (scNEChanged=0, scSWChanged=1, scInvalid=2, scSkipped=3);
+    TSliverState = (scNEChanged=0, scSWChanged=1, scInvalid=2, scNNEEChanged=3, scSSWWChanged=4);
     TSliverStates = set of TSliverState;
   public
     /// <summary>
@@ -902,12 +902,12 @@ type
     FData: TArray<TSlice>;
     FFutureBitmap: TGridBitmap;
     //FData: array[0..255] of TSlice;  //to be replaced by a variable size structure later
-    function GetSlice(const Coordinate: TPoint): TSlice; overload; inline;
-    procedure SetSlice(const Coordinate: TPoint; const Value: TSlice); overload; inline;
-    function GetSlice(x,y: integer): TSlice; overload; inline;
-    procedure SetSlice(x,y: integer; const Value: TSlice); overload; inline;
-    function GetSlice(i: integer): TSlice; overload; inline;
-    procedure SetSlice(i: integer; const Value: TSlice); overload; inline;
+    function GetItem(const Coordinate: TPoint): TSlice; overload; inline;
+    procedure SetItem(const Coordinate: TPoint; const Value: TSlice); overload; inline;
+    function GetItem(x,y: integer): TSlice; overload; inline;
+    procedure SetItem(x,y: integer; const Value: TSlice); overload; inline;
+    function GetItem(i: integer): TSlice; overload; inline;
+    procedure SetItem(i: integer; const Value: TSlice); overload; inline;
     function BoundingRect: TRect;
     /// <summary>
     ///  The core of the gridwalker algorithm
@@ -944,7 +944,7 @@ type
     ///  That does not equal MinSlice.
     ///  Pass nil in MinSlice if any slice will do.
     /// </summary>
-    procedure GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
+    function GetMinSlice(out MinCount: integer): PSlice;
     /// <summary>
     ///  Convert a unique grid (a grid where every slice only has a single allowed constellation)
     ///  To a bitmap that can be processed.
@@ -972,6 +972,7 @@ type
     function SliverSolveOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
     function SliverSolveReverseOldNoRepeat(x, y: integer; const MinMax: TRect): TSliverChanges;
     function GetUniqueSolutionOldNoRepeat: TSliverChanges; overload;
+    function GetUniqueSolutionCDCL: TSliverChanges;
   public type
     /// <summary>
     ///  After the basic overlapping of gridwalker has run out of steam
@@ -1110,9 +1111,10 @@ type
     ///  Get the slice at the given coordinate.
     ///  !!Will generate an exception if the coordinate is out of bounds!!.
     /// </summary>
-    property Item[const Coordinate: TPoint]: TSlice read GetSlice write SetSlice; default;
-    property Item[x,y: integer]: TSlice read GetSlice write SetSlice; default;
-    property Item[i: integer]: TSlice read GetSlice write SetSlice; default;
+    property Item[const Coordinate: TPoint]: TSlice read GetItem write SetItem; default;
+    property Item[x,y: integer]: TSlice read GetItem write SetItem; default;
+    property Item[i: integer]: TSlice read GetItem write SetItem; default;
+    //property Slice[i: integer]: PSlice read
     property FutureBitmap: TGridBitmap read FFutureBitmap write FFutureBitmap;
   end;
 
@@ -1309,6 +1311,7 @@ type
     BtnSolveOldNoRepeat: TButton;
     ProgressBar2: TProgressBar;
     BtnSearchSize: TButton;
+    BtnSolveCDCL: TButton;
     procedure Action_SliverSolveRoundExecute(Sender: TObject);
     /// <summary>
     ///  We can create a lookup table by enumerating all 7x7 bitmaps.
@@ -1370,6 +1373,7 @@ type
     procedure BtnClearMemoClick(Sender: TObject);
     procedure BtnSolveOldNoRepeatClick(Sender: TObject);
     procedure BtnSearchSizeClick(Sender: TObject);
+    procedure BtnSolveCDCLClick(Sender: TObject);
   private
     Buffer: TArray<TSlice>;
     ChunkLookup: array [boolean] of TArray<TSuperSlice>;
@@ -5876,6 +5880,35 @@ begin
 end;
 
 //deprecated
+procedure TForm2.BtnSolveCDCLClick(Sender: TObject);
+begin
+
+  var BoundingRect:= FindBoundingBox;
+  if (BoundingRect = Rect(-1,-1,-1,-1)) then exit;
+  var MySlices:= TGrid.Create(BoundingRect.Width+1,BoundingRect.Height+1);
+  // Get the slice data from the grid, by looking it up in the lookup table
+  for var x:= BoundingRect.Left to BoundingRect.Right do begin
+    for var y:= BoundingRect.Top to BoundingRect.Bottom do begin
+      //if (x in [0,1,8,9]) or (y in [0,1,8,9]) then begin
+        MySlices[x-BoundingRect.Left, y-BoundingRect.Top]:= FutureGridToPastSliceSimple(StringGrid1, x, y, LookupTable);
+        FutureGridToBitmap(StringGrid1,x,y,MySlices.FFutureBitmap);
+      //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+      StringGrid3.Cells[x-1, y-1]:= '';
+    end;
+  end;
+  //Start the timer
+  var Timer:= THiResStopWatch.StartNew;
+
+  var Status:= MySlices.GridSolveOld(MySlices.BoundingRect);
+  //DisplaySlices(Form2.StringGrid2, Form2.StringGrid3, MySlices, true);
+  if Status.IsValid then Status:= MySlices.GetUniqueSolutionCDCL;//(ValidSolutions, ValidCount);
+  //Label1.Caption:= ValidCount.ToString;
+  Timer.Stop;
+  Memo1.Lines.Add(Timer.ElapsedTicks.ToString+' ticks until solution '+Timer.ElapsedMilliseconds.ToString+' ms');
+  if Status.IsInvalid then Memo1.Lines.Add('UNSAT - Pattern is a GoE')
+  else Memo1.Lines.Add('SAT - Pattern has a solution');
+end;
+
 procedure TForm2.BtnSolveCounterClick(Sender: TObject);
 begin
   DoARun(rCounter);
@@ -8449,12 +8482,12 @@ begin
   Result:= MinPoint;
 end;
 
-function TGrid.GetSlice(x, y: integer): TSlice;
+function TGrid.GetItem(x, y: integer): TSlice;
 begin
-  Result:= GetSlice(point(x,y));
+  Result:= GetItem(point(x,y));
 end;
 
-function TGrid.GetSlice(const Coordinate: TPoint): TSlice;
+function TGrid.GetItem(const Coordinate: TPoint): TSlice;
 begin
   Result:= FData[Coordinate.Index(FSizeX)];
 end;
@@ -8490,17 +8523,17 @@ begin;
   end;
 end;
 
-procedure TGrid.SetSlice(const Coordinate: TPoint; const Value: TSlice);
+procedure TGrid.SetItem(const Coordinate: TPoint; const Value: TSlice);
 begin;
   FData[Coordinate.Index(FSizeX)]:= Value;
 end;
 
-procedure TGrid.SetSlice(x, y: integer; const Value: TSlice);
+procedure TGrid.SetItem(x, y: integer; const Value: TSlice);
 begin
-  SetSlice(point(x,y), Value);
+  SetItem(point(x,y), Value);
 end;
 
-procedure TGrid.SetSlice(i: integer; const Value: TSlice);
+procedure TGrid.SetItem(i: integer; const Value: TSlice);
 begin
   Assert(i < Length(FData));
   FData[i]:= Value;
@@ -8834,16 +8867,16 @@ begin
   end; {for y}
 end;
 
-procedure TGrid.GetMinSlice(out MinSlice: PSlice; out MinCount: integer);
+function TGrid.GetMinSlice(out MinCount: integer): PSlice;
 begin
   MinCount:= 513;
-  MinSlice:= nil;
+  Result:= nil;
   for var Slice in Self do begin
     var Count:= Slice.PopCount;
     if (Count < MinCount) and (Count > 1) then begin
-      MinSlice:= Slice;
+      Result:= Slice;
       MinCount:= Count;
-      if (MinCount = 2) then exit;
+      if (MinCount = 2) then Exit;
     end;
   end;
 end;
@@ -8852,45 +8885,6 @@ function TGrid.GetSliceIndex(Slice: PSlice): integer;
 begin
   Result:= (NativeUInt(Slice) - NativeUInt(@FData[0])) div SizeOf(TSlice);
 end;
-
-//function TGrid.GetUniqueSolution: TSliverChanges;
-//const
-//  HasUniqueSolution = 513;
-//var
-//  MinCount: integer;
-//  MinSlice: PSlice;
-//begin
-//  GetMinSlice(MinSlice, MinCount);
-//  //If we cannot find a count other than 1, then we have reached a unique solution.
-//  if (MinCount = HasUniqueSolution) then Exit(TSliverChanges.Changed);
-//  var MinSliceIndex:= GetSliceIndex(MinSlice);
-//  FActive.Activate(MinSliceIndex);
-//  if (MinSliceIndex - FSizeY) >= (0) then FActive.Activate(MinSliceIndex-FSizeY);
-//  if (MinSliceIndex + FSizeY) < (FSizeX * FSizeY) then FActive.Activate(MinSliceIndex+FSizeY);
-//  if ((MinSliceIndex) mod FSizeX) > 0 then FActive.Activate(MinSliceIndex-1);
-//  if ((MinSliceIndex) mod FSizeX) < (FSizeX-1) then FActive.Activate(MinSliceIndex+1);
-//  //Explore each of the alternatives recursively
-//  var Clone:= Self.Clone;
-//  var Index:= -1;
-//  for var i:= 0 to MinCount -1 do begin
-//    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
-//    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
-//    //solve the grid
-//    var Changes:= Self.GridSolve(Rect(0,0,9,9)); //if we're lucky then there is no solution
-//    if Changes.IsValid then begin
-//      //There is no quick contradiction, is there perhaps a satisfying assignment here?
-//      Result:= GetUniqueSolution; //Depth first search for a solution.
-//      if Result.IsValid then Exit;   //Early out when we have a unique solution
-//      //Add the grid to the list of valid grids
-//    end;
-//    //No single solution? then reset the grid and try the next constellation
-//    if (i < (MinCount-1)) then Clone.Overwrite(Self)
-//  end; {for i}
-//    //We have now reduced our grid to only those states that are valid upon first inspection.
-//    //All alternatives investigated are invalid, there is no solution, return UNSAT.
-//    Result:= TSliverChanges.Invalid;
-//  //end;
-//end;
 
 procedure TGrid.DisplayUniqueSolution(const SG: TStringGrid);
 begin
@@ -8920,7 +8914,7 @@ begin
   //var MemUsed:= GetMemoryUsed;
   //if MemUsed > Form2.MaxMemoryUsed then Form2.MaxMemoryUsed:= MemUsed;
 
-  GetMinSlice(MinSlice, MinCount);
+  MinSlice:= GetMinSlice(MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     //DisplayUniqueSolution(Form2.StringGrid2);
@@ -8970,7 +8964,7 @@ var
   MinCount: integer;
   MinSlice: PSlice;
 begin
-  GetMinSlice(MinSlice, MinCount);
+  MinSlice:= GetMinSlice(MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     Inc(ValidCount);
@@ -9002,6 +8996,44 @@ begin
   else Result:= TSliverChanges.Changed;
 end;
 
+//function TGrid.GetUniqueSolutionOld(var ValidSolutions: TArray<TGrid>; var ValidCount: integer): TSliverChanges;
+//const
+//  HasUniqueSolution = 513;
+//var
+//  MinCount: integer;
+//  MinSlice: PSlice;
+//begin
+//  GetMinSlice(MinSlice, MinCount);
+//  //If we cannot find a count other than 1, then we have reached a unique solution.
+//  if (MinCount = HasUniqueSolution) then begin
+//    Inc(ValidCount);
+//    if Length(ValidSolutions) < ValidCount then SetLength(ValidSolutions, ValidCount);
+//    ValidSolutions[ValidCount-1]:= Self.Clone;
+//    Exit(TSliverChanges.Changed);
+//  end;
+//  //FActive.Activate(GetSliceIndex(MinSlice));
+//  //Explore each of the alternatives recursively
+//  var Clone:= Self.Clone;
+//  var Index:= -1;
+//  for var i:= 0 to MinCount -1 do begin
+//    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
+//    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+//    //solve the grid
+//    //starting at the pivot (this saves about 10%).
+//    var Changes:= Self.GridSolveOld(BoundingRect, GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+//    if Changes.IsValid then begin
+//      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+//      Result:= GetUniqueSolutionOld(ValidSolutions, ValidCount); //Depth first search for a solution.
+//      //if Result.IsValid then Exit;   //Early out when we have a unique solution
+//    end;
+//    //No single solution? then reset the grid and try the next constellation
+//    if (i < (MinCount-1)) then Clone.Overwrite(Self)
+//  end; {for i}
+//    //We have now reduced our grid to only those states that are valid upon first inspection.
+//    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+//  if (ValidCount = 0) then Result:= TSliverChanges.Invalid
+//  else Result:= TSliverChanges.Changed;
+//end;
 
 
 function TGrid.GetUniqueSolutionOldSingleSweep: TSliverChanges;
@@ -9011,7 +9043,7 @@ var
   MinCount: integer;
   MinSlice: PSlice;
 begin
-  GetMinSlice(MinSlice, MinCount);
+  MinSlice:= GetMinSlice(MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     //DisplayUniqueSolution(Form2.StringGrid2);
@@ -9049,7 +9081,7 @@ var
   MinCount: integer;
   MinSlice: PSlice;
 begin
-  GetMinSlice(MinSlice, MinCount);
+  MinSlice:= GetMinSlice(MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     //Test to see if this solution is indeed valid
@@ -9080,14 +9112,69 @@ begin
   Result:= TSliverChanges.Invalid
 end;
 
+function TGrid.GetUniqueSolutionCDCL: TSliverChanges;
+const
+  HasUniqueSolution = 513;
+var
+  MinCount: integer;
+begin
+  var MinSlice:= GetMinSlice(MinCount);
+  //If we cannot find a count other than 1, then we have reached a unique solution.
+  if (MinCount = HasUniqueSolution) then begin
+    Exit(TSliverChanges.Changed);
+  end;
+  //Explore each of the alternatives recursively
+  var Clone:= Self.Clone;
+  var Index:= -1;
+  var i:= 0;
+  while i < MinCount do begin
+    Index:= MinSlice.NextSetBit(Index); //Get the next constellation
+    MinSlice.ForceSingleBit(Index); //Is this constellation valid?
+    //solve the grid
+    //starting at the pivot (this saves about 10%).
+    var Changes:= Self.GridSolveOld(Self.BoundingRect, GetSliceIndex(MinSlice)); //if we're lucky then there is no solution
+    if Changes.IsValid then begin
+      //There is no quick contradiction, is there perhaps a satisfying assignment here?
+      Result:= GetUniqueSolutionCDCL; //Depth first search for a solution.
+      if Result.IsValid then Exit;   //Early out when we have a unique solution
+    end;
+    //Changes = Invalid here!, we have found a contraction.
+    //Remove the invalid solution from the grid
+    if (i < (MinCount-1)) then begin //don't bother if this is the last constellation
+      var MinSliceIndex:= Self.GetSliceIndex(MinSlice);
+      Clone.FData[MinSliceIndex].SetBit(Index, false);  //Remove the invalid state from the grid.
+      Result:= Clone.GridSolve(Self.BoundingRect, MinSliceIndex); //Propagate these changes in the clone. Learning!
+      Clone.Overwrite(Self);
+      if Result.IsInvalid then Exit; //If the entire grid is invalid, then we are done.
+      if Result.IsChanged then begin
+        //If there are changes, then we need to find the new minimal slice
+        var NewMinSlice:= GetMinSlice(MinCount);
+        if (NewMinSlice = nil) then Exit(TSliverChanges.Changed); //We have a unique solution
+        if NewMinSlice <> MinSlice then begin
+          //New min slice, reset the loop.
+          //The new MinSlice will always have a lower count than the old one
+          //So we are always making progress.
+          i:= 0;
+          MinSlice:= NewMinSlice;
+          Index:= -1;
+        end; {if New minimal slice found}
+      end; {if Changes happened}
+    end; {if not the last constellation}
+    Inc(i);
+  end; {while}
+    //We have now reduced our grid to only those states that are valid upon first inspection.
+    //All alternatives investigated are invalid, there is no solution, return UNSAT.
+  Result:= TSliverChanges.Invalid
+end;
+
+
 function TGrid.GetUniqueSolutionOldNoRepeat: TSliverChanges;
 const
   HasUniqueSolution = 513;
 var
   MinCount: integer;
-  MinSlice: PSlice;
 begin
-  GetMinSlice(MinSlice, MinCount);
+  var MinSlice:= GetMinSlice(MinCount);
   //If we cannot find a count other than 1, then we have reached a unique solution.
   if (MinCount = HasUniqueSolution) then begin
     //Test to see if this solution is indeed valid
@@ -9238,7 +9325,7 @@ begin
   if (SolveMe = smSolveAndExcludeInvalids) and ((a+1) <> Count) then SetLength(Result,a+1);
 end;
 
-function TGrid.GetSlice(i: integer): TSlice;
+function TGrid.GetItem(i: integer): TSlice;
 begin
   Assert(i < Length(FData));
   Result:= FData[i];

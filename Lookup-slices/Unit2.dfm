@@ -22,7 +22,7 @@ object Form2: TForm2
     Top = 0
     Width = 1514
     Height = 729
-    ActivePage = TabSheet6
+    ActivePage = TabSheet1
     Align = alClient
     Style = tsFlatButtons
     TabOrder = 0
@@ -121,9 +121,9 @@ object Form2: TForm2
       end
       object Memo1: TMemo
         Left = 0
-        Top = 256
+        Top = 320
         Width = 187
-        Height = 404
+        Height = 340
         Lines.Strings = (
           'Memo1')
         TabOrder = 1
@@ -618,6 +618,15 @@ object Form2: TForm2
         Caption = 'No repeat'
         TabOrder = 30
         OnClick = BtnSolveOldNoRepeatClick
+      end
+      object BtnSolveCDCL: TButton
+        Left = 3
+        Top = 250
+        Width = 169
+        Height = 25
+        Caption = 'BtnSolveCDCL'
+        TabOrder = 31
+        OnClick = BtnSolveCDCLClick
       end
     end
     object TabSheet2: TTabSheet
